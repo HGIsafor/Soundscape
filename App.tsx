@@ -510,9 +510,9 @@ export default function App() {
   const { width } = useWindowDimensions();
   const compact = width < 760;
   const spotifyClientId = process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID!;
-  const spotifyRedirectUri = Platform.OS === 'web' && typeof window !== 'undefined'
-    ? `${window.location.origin}/spotify-callback`
-    : AuthSession.makeRedirectUri({ scheme: 'soundscape-login', path: 'callback' });
+  const spotifyRedirectUri = Platform.OS === 'web'
+    ? process.env.EXPO_PUBLIC_SPOTIFY_REDIRECT_URI?.trim() || `${window.location.origin}/spotify-callback`
+    : AuthSession.makeRedirectUri({ scheme: 'soundscape-login', path: 'callback', native: 'soundscape-login://callback' });
   const [spotifyRequest, spotifyResponse, promptSpotify] = AuthSession.useAuthRequest({ clientId: spotifyClientId, responseType: AuthSession.ResponseType.Code, redirectUri: spotifyRedirectUri, scopes: spotifyScopes, usePKCE: true }, spotifyDiscovery);
   const [page, setPage] = useState<'music' | 'eq' | 'stats'>('eq');
   const [navWidth, setNavWidth] = useState(0);
@@ -526,6 +526,7 @@ export default function App() {
   const [spotifyHistory, setSpotifyHistory] = useState<SpotifyTrack[]>([]);
   const [spotifyNextTrack, setSpotifyNextTrack] = useState<SpotifyTrack | null>(null);
   const [spotifyError, setSpotifyError] = useState('');
+  const [spotifyAuthError, setSpotifyAuthError] = useState('');
   const [sharedSession, setSharedSession] = useState<SharedSession | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [sessionError, setSessionError] = useState('');
@@ -786,13 +787,20 @@ export default function App() {
     } catch (error) { setSpotifyError(error instanceof Error ? error.message : 'Spotify login failed'); }
   }, []);
   useEffect(() => {
+    if (spotifyResponse?.type === 'error') {
+      setSpotifyAuthError(`Spotify login failed: ${spotifyResponse.params.error_description ?? spotifyResponse.params.error ?? 'Please try again.'}`);
+      return;
+    }
     if (spotifyResponse?.type !== 'success' || !spotifyResponse.params.code || !spotifyRequest?.codeVerifier || !user) return;
     AuthSession.exchangeCodeAsync({ clientId: spotifyClientId, code: spotifyResponse.params.code, redirectUri: spotifyRedirectUri, extraParams: { code_verifier: spotifyRequest.codeVerifier } }, spotifyDiscovery)
       .then(async response => {
         if (!response.refreshToken) throw new Error('Spotify did not return a refresh token');
         const token = { accessToken: response.accessToken, refreshToken: response.refreshToken, expiresAt: Date.now() + (response.expiresIn ?? 3600) * 1000 };
         setSpotifyToken(token); await saveSpotifyToken(user.id, token); await readSpotifyPlayback(token);
-      }).catch(error => setSpotifyError(error instanceof Error ? error.message : 'Spotify login failed'));
+      }).catch(error => {
+        const message = error instanceof Error ? error.message : 'Spotify login failed';
+        setSpotifyError(message); setSpotifyAuthError(message);
+      });
   }, [spotifyResponse, user?.id]);
   useEffect(() => {
     if (!spotifyToken || (sharedSession && sharedSession.hostUserId !== user?.id)) return;
@@ -877,10 +885,21 @@ export default function App() {
       await saveSpotifyToken(user.id, null);
       return;
     }
-    await authorizeSpotify();
+    try { await authorizeSpotify(); }
+    catch (error) { setSpotifyError(error instanceof Error ? error.message : 'Could not open Spotify login.'); }
   };
   const authorizeSpotify = async () => {
     if (!user) { setAuthOpen(true); return; }
+    setSpotifyAuthError('');
+    if (Platform.OS === 'web') {
+      const callback = new URL(spotifyRedirectUri);
+      if (callback.hostname === 'localhost' || (callback.protocol !== 'https:' && !(callback.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(callback.hostname)))) {
+        throw new Error('Spotify requires HTTPS or a loopback IP address. For local development, open Soundscape at http://127.0.0.1:' + (window.location.port || '80') + ' and register its /spotify-callback URL in the Spotify Developer Dashboard.');
+      }
+      if (callback.origin !== window.location.origin) {
+        throw new Error(`Open Soundscape at ${callback.origin} before connecting Spotify so login can return to this browser session.`);
+      }
+    }
     if (!spotifyRequest) throw new Error('Spotify login is still loading. Please try again.');
     if (spotifyRequest) {
       if (Platform.OS === 'web' && spotifyRequest.codeVerifier && spotifyRequest.url) {
@@ -1357,7 +1376,7 @@ export default function App() {
           <View style={[s.pagerPage, { width }]}>
             <StatsPage active={page === 'stats'} compact={compact} accent={accent} foreground={accentForeground(accent)} accountId={user?.id} connected={!!spotifyToken} tokenKey={spotifyToken?.accessToken}
               getToken={async () => { if (!spotifyToken) throw new Error('Connect Spotify first.'); return ensureSpotifyToken(spotifyToken); }}
-              onConnect={authorizeSpotify} />
+              onConnect={authorizeSpotify} authError={spotifyAuthError} />
           </View>
         </Animated.View>
         {page !== 'music' && <View accessible accessibilityRole="button" accessibilityLabel={page === 'stats' ? 'Open sound page' : 'Open music page'} onAccessibilityTap={() => animateToPage(page === 'stats' ? 'eq' : 'music')} {...leftEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonLeft]} />}
