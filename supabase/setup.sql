@@ -5,6 +5,8 @@ create table if not exists public.user_settings (
   user_id uuid primary key references auth.users(id) on delete cascade,
   username text not null check (char_length(username) between 1 and 50),
   avatar_path text,
+  follow_cover boolean not null default false,
+  favorite_color text not null default '#1ed760' check (favorite_color ~ '^#[0-9A-Fa-f]{6}$'),
   updated_at timestamptz not null default now()
 );
 
@@ -20,8 +22,17 @@ create table if not exists public.sound_profiles (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.spotify_connections (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  access_token text not null,
+  refresh_token text not null,
+  expires_at timestamptz not null,
+  updated_at timestamptz not null default now()
+);
+
 alter table public.user_settings enable row level security;
 alter table public.sound_profiles enable row level security;
+alter table public.spotify_connections enable row level security;
 
 create policy "users manage own settings" on public.user_settings for all
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
@@ -29,6 +40,10 @@ create policy "users read own profiles" on public.sound_profiles for select usin
 create policy "users create own profiles" on public.sound_profiles for insert with check ((select auth.uid()) = user_id);
 create policy "users update own profiles" on public.sound_profiles for update using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 create policy "users delete own profiles" on public.sound_profiles for delete using ((select auth.uid()) = user_id);
+create policy "users read own spotify connection" on public.spotify_connections for select using ((select auth.uid()) = user_id);
+create policy "users create own spotify connection" on public.spotify_connections for insert with check ((select auth.uid()) = user_id);
+create policy "users update own spotify connection" on public.spotify_connections for update using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "users delete own spotify connection" on public.spotify_connections for delete using ((select auth.uid()) = user_id);
 
 insert into storage.buckets (id, name, public) values ('avatars', 'avatars', false)
 on conflict (id) do update set public = false;
