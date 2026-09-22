@@ -17,7 +17,25 @@ npm install
 npm run start
 ```
 
+## Appearance
+
+Use the moon switch in profile settings: on for dark mode (the default), off for light mode.
+Signed-in users save this choice to Supabase account metadata
+(`soundscape_theme`), so it loads when signing in on another device.
+No database migration is required. Guests use dark mode; signing in restores
+the account preference.
+
 ## Spotify login and listening stats
+
+Run [`supabase/listening-rankings.sql`](supabase/listening-rankings.sql) once in
+the Supabase SQL Editor to enable account-wide listening chart history.
+Tracks and artists each keep separate snapshots for every listening time range.
+The first successful visit each UTC day saves that day's chart; repeat visits,
+refreshes, and other devices reuse it. Arrows compare ranks with the previous
+saved day, even if you skipped several days. `New` means an entry was absent
+from that earlier top 50; a dash means unchanged (or no earlier snapshot yet).
+Only the latest two snapshots are retained, and recent plays remain live.
+If account storage is unavailable, live rankings still load with a notice.
 
 Spotify must allow the exact callback URL used by this app. In your Spotify
 Developer Dashboard, open the app matching `EXPO_PUBLIC_SPOTIFY_CLIENT_ID` and

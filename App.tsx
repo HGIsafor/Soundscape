@@ -6,11 +6,12 @@ import { StatusBar } from 'expo-status-bar';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, SafeAreaView,
-  Image, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View,
+  Image, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View,
 } from 'react-native';
 import { supabase } from './lib/supabase';
 import { coverColor } from './lib/cover-color';
 import { StatsPage } from './lib/StatsPage';
+import { palettes, Palette, ThemeContext, ThemeMode, useTheme, readableAccent } from './lib/theme';
 import { loadSpotifyToken, refreshSpotifyToken, saveSpotifyToken, spotifyApi, spotifyDiscovery, spotifyScopes, SpotifyToken } from './lib/spotify';
 
 // A direct visit to the callback has no opener and Expo throws here, which used
@@ -20,8 +21,8 @@ if (Platform.OS === 'web') {
   try { spotifyBrowserCompletion = WebBrowser.maybeCompleteAuthSession(); } catch { /* handled in App */ }
 }
 
-const C = { bg: '#000', surface: '#121212', raised: '#1f1f1f', line: '#535353', text: '#fff', muted: '#b3b3b3', green: '#1ed760' };
-const AccentContext = createContext(C.green);
+const C = palettes.dark;
+const AccentContext = createContext<string>(C.green);
 const accentForeground = (hex: string) => {
   const channels = [1, 3, 5].map(index => {
     const value = parseInt(hex.slice(index, index + 2), 16) / 255;
@@ -33,7 +34,7 @@ const accentForeground = (hex: string) => {
 const accentHeadingGlow = (hex: string, thickness = 0.35) => accentForeground(hex) === '#ddd'
   ? ({ textShadow: `${thickness}px 0 #ddd, -${thickness}px 0 #ddd, 0 ${thickness}px #ddd, 0 -${thickness}px #ddd` } as any)
   : {};
-function contrastStyles(accent: string) {
+function contrastStyles(accent: string, s: ReturnType<typeof createStyles>) {
   const color = accentForeground(accent);
   return {
     ...s,
@@ -77,7 +78,7 @@ const hexToHsv = (hex: string): Hsv => {
 };
 type Values = { bass: number; mid: number; treble: number; ambience: number; gain: number };
 type Profile = { id: string; name: string; values: Values };
-type Account = { id: string; email: string; name: string; avatarPath?: string; avatarUrl?: string; favoriteColor: string; followCover: boolean };
+type Account = { id: string; email: string; name: string; avatarPath?: string; avatarUrl?: string; favoriteColor: string; followCover: boolean; theme: ThemeMode };
 type SpotifyTrack = { id?: string; uri?: string; title: string; artist: string; album?: string; artwork?: string; durationMs: number; progressMs: number };
 const spotifyTrackKey = (track: SpotifyTrack) => track.uri ?? track.id ?? `${track.title}\u0000${track.artist}`;
 const sameSpotifyTrack = (left: SpotifyTrack | null | undefined, right: SpotifyTrack | null | undefined) => !!left && !!right && spotifyTrackKey(left) === spotifyTrackKey(right);
@@ -97,6 +98,7 @@ const DEFAULTS: Profile[] = [
 ];
 
 function Slider({ label, value, onChange, transition }: { label: string; value: number; onChange: (v: number) => void; transition: number }) {
+  const s = useAppStyles();
   const accent = useContext(AccentContext);
   const [width, setWidth] = useState(1);
   const animatedValue = useRef(new Animated.Value(value)).current;
@@ -142,6 +144,7 @@ function Slider({ label, value, onChange, transition }: { label: string; value: 
 }
 
 function SeekBar({ value, duration, onPreview, onCommit }: { value: number; duration: number; onPreview: (value: number) => void; onCommit: (value: number) => void }) {
+  const s = useAppStyles();
   const accent = useContext(AccentContext);
   const latest = useRef({ width: 1, value, duration, onPreview, onCommit });
   latest.current = { ...latest.current, value, duration, onPreview, onCommit };
@@ -178,29 +181,31 @@ const spotifyItemToTrack = (item: any): SpotifyTrack => ({
 });
 
 function PlayPauseIcon({ playing }: { playing: boolean }) {
-  const s = contrastStyles(useContext(AccentContext));
+  const s = useAppStyles();
   return playing
     ? <View style={s.pauseIcon}><View style={s.pauseBar} /><View style={s.pauseBar} /></View>
     : <View style={s.playTriangle} />;
 }
 
 function SkipIcon({ direction }: { direction: 'previous' | 'next' }) {
+  const s = useAppStyles();
   return direction === 'previous'
     ? <View style={s.skipIcon}><View style={s.skipStem} /><View style={s.skipTriangleLeft} /></View>
     : <View style={s.skipIcon}><View style={s.skipTriangleRight} /><View style={s.skipStem} /></View>;
 }
 
 function TurntableNavIcon({ active }: { active: boolean }) {
-  const s = contrastStyles(useContext(AccentContext));
+  const s = useAppStyles();
   return <View style={[s.turntableNavIcon, active && s.navDeckActive]}><View style={[s.navPlatter, active && s.navIconShapeActive]}><View style={[s.navPlatterLabel, active && s.navIconShapeActive]}><View style={[s.navSpindle, active && s.navIconSolidActive]} /></View></View><View style={[s.navTonearmBase, active && s.navIconShapeActive]} /><View style={[s.navTonearm, active && s.navIconSolidActive]}><View style={[s.navTonearmHead, active && s.navIconSolidActive]} /></View><View style={[s.navDeckButton, active && s.navIconSolidActive]} /></View>;
 }
 
 function EqualizerNavIcon({ active }: { active: boolean }) {
-  const s = contrastStyles(useContext(AccentContext));
+  const s = useAppStyles();
   return <View style={s.equalizerNavIcon}>{[15, 5, 11].map((top, index) => <View key={index} style={s.navFaderColumn}><View style={[s.navFaderTrack, active && s.navIconSolidActive]} /><View style={[s.navFaderKnob, { top }, active && s.navFaderKnobActive]} /></View>)}</View>;
 }
 
 function CurvedLabelText({ text, compact }: { text: string; compact: boolean }) {
+  const s = useAppStyles();
   const characters = text.split('');
   const arc = (bottom: boolean) => characters.map((character, index) => {
     const progress = characters.length <= 1 ? 0.5 : index / (characters.length - 1);
@@ -212,6 +217,7 @@ function CurvedLabelText({ text, compact }: { text: string; compact: boolean }) 
 }
 
 function ColorWheel({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+  const s = useAppStyles();
   const size = 250;
   const center = size / 2;
   const ringRadius = 105;
@@ -256,7 +262,10 @@ function ColorWheel({ value, onChange }: { value: string; onChange: (color: stri
 }
 
 function MusicPage({ playing, trackIndex, compact, spotifyTrack, spotifyHistory, spotifyNextTrack, spotifyConnected, spotifyError, onConnect, onToggle, onPrevious, onNext, onJump, onSeek }: { playing: boolean; trackIndex: number; compact: boolean; spotifyTrack: SpotifyTrack | null; spotifyHistory: SpotifyTrack[]; spotifyNextTrack: SpotifyTrack | null; spotifyConnected: boolean; spotifyError: string; onConnect: () => void; onToggle: () => void; onPrevious: () => void; onNext: () => void; onJump: (offset: number, track: SpotifyTrack) => void; onSeek: (position: number) => void }) {
+  const s = useAppStyles();
   const accent = useContext(AccentContext);
+  const theme = useTheme();
+  const accentText = readableAccent(accent, theme);
   const spin = useRef(new Animated.Value(0)).current;
   const spinLoop = useRef<Animated.CompositeAnimation | null>(null);
   const spinning = useRef(playing);
@@ -490,14 +499,14 @@ function MusicPage({ playing, trackIndex, compact, spotifyTrack, spotifyHistory,
 
         <View style={[s.playerPanel, !compact && s.playerPanelDesktop]}>
           {!compact && lyricsBlock}
-          <View style={s.trackCopy}><Text style={[s.trackKicker, { color: accent }, accentHeadingGlow(accent)]}>{spotifyTrack ? 'NOW PLAYING' : 'START PLAYING'}</Text><Text style={s.trackTitle}>{track.title}</Text><Text style={s.trackArtist}>{track.artist}</Text></View>
+          <View style={s.trackCopy}><Text style={[s.trackKicker, { color: accentText }, (theme.mode === 'dark' ? accentHeadingGlow(accentText) : {})]}>{spotifyTrack ? 'NOW PLAYING' : 'START PLAYING'}</Text><Text style={s.trackTitle}>{track.title}</Text><Text style={s.trackArtist}>{track.artist}</Text></View>
           <View><SeekBar value={displayProgress} duration={track.durationMs} onPreview={previewProgress} onCommit={onSeek} /><View style={s.timeRow}><Text style={s.timeText}>{formatTime(displayProgress)}</Text><Text style={s.timeText}>{formatTime(track.durationMs)}</Text></View></View>
           <View style={s.playbackControls}>
             <Pressable accessibilityLabel="Previous track" onPress={onPrevious} style={({ pressed }) => [s.skipButton, pressed && s.pressed]}><SkipIcon direction="previous" /></Pressable>
             <Pressable accessibilityLabel={playing ? 'Pause' : 'Play'} onPress={onToggle} style={({ pressed }) => [s.playButton, { backgroundColor: accent }, pressed && s.pressed]}><PlayPauseIcon playing={playing} /></Pressable>
             <Pressable accessibilityLabel="Next track" onPress={onNext} style={({ pressed }) => [s.skipButton, pressed && s.pressed]}><SkipIcon direction="next" /></Pressable>
           </View>
-          {!spotifyConnected && <Pressable onLayout={event => setConnectionLinkHeight(event.nativeEvent.layout.height)} onPress={onConnect} style={({ pressed }) => [s.spotifySettingsLink, pressed && s.pressed]}><Text style={s.spotifySettingsLinkText}>Go to Spotify connection</Text><Text style={[s.spotifySettingsArrow, { color: accent }]}>›</Text></Pressable>}
+          {!spotifyConnected && <Pressable onLayout={event => setConnectionLinkHeight(event.nativeEvent.layout.height)} onPress={onConnect} style={({ pressed }) => [s.spotifySettingsLink, pressed && s.pressed]}><Text style={s.spotifySettingsLinkText}>Go to Spotify connection</Text><Text style={[s.spotifySettingsArrow, { color: accentText }]}>›</Text></Pressable>}
           {!!spotifyError && <Text style={s.spotifyError}>{spotifyError}</Text>}
           {compact && lyricsBlock}
         </View>
@@ -509,6 +518,8 @@ function MusicPage({ playing, trackIndex, compact, spotifyTrack, spotifyHistory,
 export default function App() {
   const { width } = useWindowDimensions();
   const compact = width < 760;
+  const [themeSaving, setThemeSaving] = useState(false);
+  const [themeError, setThemeError] = useState('');
   const spotifyClientId = process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID!;
   const spotifyRedirectUri = Platform.OS === 'web'
     ? process.env.EXPO_PUBLIC_SPOTIFY_REDIRECT_URI?.trim() || `${window.location.origin}/spotify-callback`
@@ -548,7 +559,7 @@ export default function App() {
   const [passwordConfirm, setPasswordConfirm] = useState('');
   const [avatarDraft, setAvatarDraft] = useState<string | undefined>();
   const [avatarMime, setAvatarMime] = useState<string | undefined>();
-  const [favoriteColorDraft, setFavoriteColorDraft] = useState(C.green);
+  const [favoriteColorDraft, setFavoriteColorDraft] = useState<string>(C.green);
   const [followCoverDraft, setFollowCoverDraft] = useState(false);
   const [artworkAccent, setArtworkAccent] = useState<{ url: string; color: string } | null>(null);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
@@ -594,14 +605,39 @@ export default function App() {
   }, [user?.id, user?.followCover, spotifyTrack?.artwork]);
   const accent = user?.followCover && artworkAccent?.url === spotifyTrack?.artwork && artworkAccent
     ? artworkAccent.color : normalizeColor(user?.favoriteColor);
-  const s = useMemo(() => contrastStyles(accent), [accent]);
+  const themeMode = user?.theme ?? 'dark';
+  const theme = palettes[themeMode];
+  const accentText = readableAccent(accent, theme);
+  const s = useMemo(() => contrastStyles(accent, createStyles(theme)), [accent, theme]);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    document.documentElement.style.colorScheme = themeMode;
+    document.documentElement.style.backgroundColor = theme.bg;
+    document.body.style.backgroundColor = theme.bg;
+  }, [themeMode, theme]);
+  const changeTheme = async (next: ThemeMode) => {
+    if (themeSaving || next === themeMode) return;
+    setThemeError('');
+    if (!user) return;
+    const accountId = user.id;
+    setThemeSaving(true);
+    try {
+      // Supabase merges this preference into the signed-in account's metadata.
+      // No device storage or schema migration is needed.
+      const { error } = await supabase.auth.updateUser({ data: { soundscape_theme: next } });
+      if (error) throw error;
+      setUser(current => current?.id === accountId ? { ...current, theme: next } : current);
+    } catch {
+      setThemeError('Could not save your appearance. Please try again.');
+    } finally { setThemeSaving(false); }
+  };
   const accentTheme = useMemo(() => ({
-    text: { color: accent },
+    text: { color: accentText },
     background: { backgroundColor: accent },
     border: { borderColor: accent },
     backgroundBorder: { backgroundColor: accent, borderColor: accent },
     tint: { backgroundColor: colorAlpha(accent, 0.14) },
-  }), [accent]);
+  }), [accent, accentText]);
 
   const ensureSpotifyToken = async (candidate: SpotifyToken) => {
     if (candidate.expiresAt > Date.now() + 60000) return candidate;
@@ -1029,7 +1065,7 @@ export default function App() {
     }, 850);
   };
 
-  const loadCloudAccount = async (authUser: { id: string; email?: string }) => {
+  const loadCloudAccount = async (authUser: { id: string; email?: string; user_metadata?: Record<string, unknown> }) => {
     const [{ data: settings }, { data: rows }] = await Promise.all([
       supabase.from('user_settings').select('username, avatar_path, favorite_color, follow_cover').eq('user_id', authUser.id).single(),
       supabase.from('sound_profiles').select('id, name, bass, mid, treble, ambience, gain').eq('user_id', authUser.id).order('created_at'),
@@ -1040,16 +1076,21 @@ export default function App() {
       avatarUrl = data?.signedUrl;
     }
     const loaded: Profile[] = (rows ?? []).map(row => ({ id: row.id, name: row.name, values: { bass: row.bass, mid: row.mid, treble: row.treble, ambience: row.ambience, gain: row.gain } }));
-    setUser({ id: authUser.id, email: authUser.email ?? '', name: settings?.username ?? authUser.email?.split('@')[0] ?? 'User', avatarPath: settings?.avatar_path ?? undefined, avatarUrl, favoriteColor: normalizeColor(settings?.favorite_color), followCover: settings?.follow_cover === true });
+    setUser({ id: authUser.id, email: authUser.email ?? '', name: settings?.username ?? authUser.email?.split('@')[0] ?? 'User', avatarPath: settings?.avatar_path ?? undefined, avatarUrl, favoriteColor: normalizeColor(settings?.favorite_color), followCover: settings?.follow_cover === true, theme: authUser.user_metadata?.soundscape_theme === 'light' ? 'light' : 'dark' });
     setProfiles(loaded);
     if (loaded.length) { setSelectedId(loaded[0].id); setValues({ ...loaded[0].values }); }
     else setSelectedId('custom');
   };
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => { if (data.session) loadCloudAccount(data.session.user); });
+    supabase.auth.getUser().then(({ data }) => { if (data.user) loadCloudAccount(data.user); });
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === 'USER_UPDATED' && session) {
+        setUser(current => current?.id === session.user.id ? { ...current, theme: session.user.user_metadata?.soundscape_theme === 'light' ? 'light' : 'dark' } : current);
+        return;
+      }
       if (session) setTimeout(() => loadCloudAccount(session.user), 0);
       else {
+        setThemeError('');
         setUser(null);
         setProfiles(DEFAULTS.map(p => ({ ...p, values: { ...p.values } })));
         setSelectedId('flat');
@@ -1253,7 +1294,7 @@ export default function App() {
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Listening stats" accessibilityState={{ selected: page === 'stats' }} onPress={() => animateToPage('stats')} style={[s.navItem, s.navItemTall]}>
           <View style={{ height: 28, flexDirection: 'row', alignItems: 'flex-end', gap: 5 }}>
-            {[12, 25, 18].map((height, index) => <View key={index} style={{ width: 6, height, borderRadius: 2, backgroundColor: page === 'stats' ? accentForeground(accent) : '#aaa' }} />)}
+            {[12, 25, 18].map((height, index) => <View key={index} style={{ width: 6, height, borderRadius: 2, backgroundColor: page === 'stats' ? accentForeground(accent) : theme.muted }} />)}
           </View>
         </Pressable>
       </View>
@@ -1273,7 +1314,7 @@ export default function App() {
   const appHeader = (
     <View style={[s.universalHeader, !compact && s.universalHeaderDesktop]}>
       <View>
-              <Text style={[s.eyebrow, accentTheme.text, accentHeadingGlow(accent)]}>{page === 'music' ? 'PLAYBACK' : page === 'stats' ? 'YOUR LISTENING' : 'SOUND PROFILE'}</Text>
+              <Text style={[s.eyebrow, accentTheme.text, (theme.mode === 'dark' ? accentHeadingGlow(accentText) : {})]}>{page === 'music' ? 'PLAYBACK' : page === 'stats' ? 'YOUR LISTENING' : 'SOUND PROFILE'}</Text>
         <Text style={s.title}>{page === 'music' ? 'Turntable' : page === 'stats' ? 'On Record' : 'Soundscape'}</Text>
       </View>
       {user ? (
@@ -1289,9 +1330,10 @@ export default function App() {
   );
 
   return (
+    <ThemeContext.Provider value={theme}>
     <AccentContext.Provider value={accent}>
     <SafeAreaView style={s.safe}>
-      <StatusBar style="light" />
+      <StatusBar style={themeMode === 'light' ? 'dark' : 'light'} />
       {appHeader}
       <View style={s.pagerViewport}>
         <Animated.View style={[s.pagerTrack, { width: width * 3, transform: [{ translateX: pagerX }] }]}>
@@ -1390,7 +1432,7 @@ export default function App() {
           <View style={s.dialog}>
             <Text style={s.dialogTitle}>Name this profile</Text>
             <Text style={s.dialogCopy}>Save these settings to use them again anytime.</Text>
-            <TextInput autoFocus value={name} onChangeText={setName} onSubmitEditing={save} placeholder="Profile name" placeholderTextColor="#777" selectionColor={accent} maxLength={30} style={s.input} />
+            <TextInput autoFocus value={name} onChangeText={setName} onSubmitEditing={save} placeholder="Profile name" placeholderTextColor={theme.subtle} selectionColor={accent} maxLength={30} style={s.input} />
             <View style={s.dialogActions}>
               <Pressable onPress={() => { setSaveOpen(false); setName(''); }} style={s.cancel}><Text style={s.cancelText}>Cancel</Text></Pressable>
               <Pressable disabled={!name.trim()} onPress={save} style={[s.confirm, accentTheme.background, !name.trim() && s.disabled]}><Text style={s.confirmText}>Save</Text></Pressable>
@@ -1418,7 +1460,17 @@ export default function App() {
           <Pressable style={StyleSheet.absoluteFill} onPress={() => { setAuthOpen(false); resetAuthForm(); }} />
           {user ? (
             <ScrollView style={s.accountDialog} contentContainerStyle={s.dialog} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              <Text style={s.dialogTitle}>Profile settings</Text>
+              <View style={s.sessionActiveRow}>
+                <Text style={[s.dialogTitle, { flex: 1 }]}>Profile settings</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View accessible={false} aria-hidden style={{ width: 20, height: 20, overflow: 'hidden' }}>
+                    <View style={{ position: 'absolute', left: 1, top: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: theme.text }} />
+                    <View style={{ position: 'absolute', left: 7, top: -3, width: 17, height: 17, borderRadius: 9, backgroundColor: theme.dialog }} />
+                  </View>
+                  <Switch accessibilityLabel="Dark mode" accessibilityHint="Saves your appearance to your account" value={themeMode === 'dark'} disabled={themeSaving} onValueChange={enabled => changeTheme(enabled ? 'dark' : 'light')} trackColor={{ false: theme.line, true: accent }} thumbColor={themeMode === 'dark' ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
+                </View>
+              </View>
+              {!!themeError && <Text accessibilityLiveRegion="polite" style={s.errorText}>{themeError}</Text>}
               <Pressable onPress={pickAvatar} style={s.photoPicker}>
                 {avatarDraft && !avatarFailed ? <Image source={{ uri: avatarDraft }} onError={() => setAvatarFailed(true)} style={s.photoPreview} /> : <View style={s.photoFallback}><Text style={s.photoInitials}>{initials(username || user.name)}</Text></View>}
                 <Text style={[s.photoAction, accentTheme.text]}>{avatarDraft ? 'Change photo' : 'Add profile photo'}</Text>
@@ -1429,21 +1481,21 @@ export default function App() {
                 </Pressable>
               )}
               <Text style={s.fieldLabel}>USERNAME</Text>
-              <TextInput autoCapitalize="none" value={username} onChangeText={text => { setUsername(text); setAuthError(''); }} onSubmitEditing={() => currentPasswordRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Username" placeholderTextColor="#777" selectionColor={accent} style={s.input} />
+              <TextInput autoCapitalize="none" value={username} onChangeText={text => { setUsername(text); setAuthError(''); }} onSubmitEditing={() => currentPasswordRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Username" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />
               <Text style={s.fieldLabel}>ACCENT COLOR</Text>
               <View style={s.colorSettingsRow}>
                 <Pressable accessibilityLabel="Open color picker" onPress={() => setColorPickerOpen(true)} style={[s.colorPreview, { backgroundColor: normalizeColor(favoriteColorDraft) }]} />
-                <TextInput autoCapitalize="none" value={favoriteColorDraft} onChangeText={text => { setFavoriteColorDraft(text); setAuthError(''); }} maxLength={7} placeholder="#1ed760" placeholderTextColor="#777" selectionColor={accent} style={[s.input, s.colorInput]} />
+                <TextInput autoCapitalize="none" value={favoriteColorDraft} onChangeText={text => { setFavoriteColorDraft(text); setAuthError(''); }} maxLength={7} placeholder="#1ed760" placeholderTextColor={theme.subtle} selectionColor={accent} style={[s.input, s.colorInput]} />
               </View>
               <Pressable accessibilityRole="switch" accessibilityState={{ checked: followCoverDraft }} onPress={() => setFollowCoverDraft(current => !current)} style={[s.sessionJoinButton, { padding: 12 }, followCoverDraft && accentTheme.background]}>
-                <Text style={{ color: followCoverDraft ? accentForeground(accent) : accent, fontWeight: '700' }}>Follow cover {followCoverDraft ? 'On' : 'Off'}</Text>
+                <Text style={{ color: followCoverDraft ? accentForeground(accent) : accentText, fontWeight: '700' }}>Follow cover {followCoverDraft ? 'On' : 'Off'}</Text>
               </Pressable>
               <Text style={s.helper}>Match the playing cover. Your chosen color stays saved as the fallback.</Text>
               <Text style={s.fieldLabel}>CURRENT PASSWORD</Text>
-              <TextInput ref={currentPasswordRef} secureTextEntry value={currentPassword} onChangeText={text => { setCurrentPassword(text); setAuthError(''); }} onSubmitEditing={() => newPasswordRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Required to change password" placeholderTextColor="#777" selectionColor={accent} style={s.input} />
+              <TextInput ref={currentPasswordRef} secureTextEntry value={currentPassword} onChangeText={text => { setCurrentPassword(text); setAuthError(''); }} onSubmitEditing={() => newPasswordRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Required to change password" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />
               <Text style={s.fieldLabel}>NEW PASSWORD</Text>
-              <TextInput ref={newPasswordRef} secureTextEntry value={password} onChangeText={text => { setPassword(text); setAuthError(''); }} onSubmitEditing={() => passwordConfirmRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Leave blank to keep current" placeholderTextColor="#777" selectionColor={accent} style={s.input} />
-              <TextInput ref={passwordConfirmRef} secureTextEntry value={passwordConfirm} onChangeText={text => { setPasswordConfirm(text); setAuthError(''); }} onSubmitEditing={saveAccount} returnKeyType="done" placeholder="Repeat new password" placeholderTextColor="#777" selectionColor={accent} style={s.input} />
+              <TextInput ref={newPasswordRef} secureTextEntry value={password} onChangeText={text => { setPassword(text); setAuthError(''); }} onSubmitEditing={() => passwordConfirmRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Leave blank to keep current" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />
+              <TextInput ref={passwordConfirmRef} secureTextEntry value={passwordConfirm} onChangeText={text => { setPasswordConfirm(text); setAuthError(''); }} onSubmitEditing={saveAccount} returnKeyType="done" placeholder="Repeat new password" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />
               <View style={s.spotifyAccountSection}>
                 <View style={s.spotifyAccountCopy}>
                   <View style={s.spotifyAccountTitleRow}><View style={[s.spotifyAccountDot, spotifyToken && s.spotifyAccountDotConnected]} /><Text style={s.spotifyAccountTitle}>Spotify</Text></View>
@@ -1465,7 +1517,7 @@ export default function App() {
                   <>
                     <Pressable onPress={hostSession} style={[s.sessionHostButton, accentTheme.background, !spotifyToken && s.disabled]}><Text style={s.sessionHostText}>Host with my Spotify</Text></Pressable>
                     <View style={s.sessionJoinRow}>
-                      <TextInput autoCapitalize="characters" value={joinCode} onChangeText={text => { setJoinCode(text.toUpperCase()); setSessionError(''); }} onSubmitEditing={joinSession} returnKeyType="go" maxLength={6} placeholder="SESSION CODE" placeholderTextColor="#777" selectionColor={accent} style={s.sessionCodeInput} />
+                      <TextInput autoCapitalize="characters" value={joinCode} onChangeText={text => { setJoinCode(text.toUpperCase()); setSessionError(''); }} onSubmitEditing={joinSession} returnKeyType="go" maxLength={6} placeholder="SESSION CODE" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.sessionCodeInput} />
                       <Pressable disabled={!joinCode.trim()} onPress={joinSession} style={[s.sessionJoinButton, accentTheme.border, !joinCode.trim() && s.disabled]}><Text style={[s.sessionJoinText, accentTheme.text]}>Join</Text></Pressable>
                     </View>
                   </>
@@ -1488,10 +1540,10 @@ export default function App() {
             <View style={s.dialog}>
               <Text style={s.dialogTitle}>{authMode === 'login' ? 'Log in' : 'Create account'}</Text>
               <Text style={s.dialogCopy}>{authMode === 'login' ? 'Access your personal sound profiles.' : 'Every new account starts with Warm, Flat, and Bright.'}</Text>
-              {authMode === 'create' && <TextInput autoFocus value={username} onChangeText={text => { setUsername(text); setAuthError(''); }} onSubmitEditing={() => emailRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Username" placeholderTextColor="#777" selectionColor={accent} style={s.input} />}
-              <TextInput ref={emailRef} autoFocus={authMode === 'login'} autoCapitalize="none" keyboardType={authMode === 'create' ? 'email-address' : 'default'} value={email} onChangeText={text => { setEmail(text); setAuthError(''); }} onSubmitEditing={() => passwordRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder={authMode === 'login' ? 'Email or username' : 'Email'} placeholderTextColor="#777" selectionColor={accent} style={s.input} />
-              <TextInput ref={passwordRef} secureTextEntry value={password} onChangeText={text => { setPassword(text); setAuthError(''); }} onSubmitEditing={() => authMode === 'create' ? passwordConfirmRef.current?.focus() : submitAuth()} returnKeyType={authMode === 'create' ? 'next' : 'done'} blurOnSubmit={authMode !== 'create'} placeholder="Password" placeholderTextColor="#777" selectionColor={accent} style={s.input} />
-              {authMode === 'create' && <TextInput ref={passwordConfirmRef} secureTextEntry value={passwordConfirm} onChangeText={text => { setPasswordConfirm(text); setAuthError(''); }} onSubmitEditing={() => submitAuth()} returnKeyType="done" placeholder="Repeat password" placeholderTextColor="#777" selectionColor={accent} style={s.input} />}
+              {authMode === 'create' && <TextInput autoFocus value={username} onChangeText={text => { setUsername(text); setAuthError(''); }} onSubmitEditing={() => emailRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Username" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />}
+              <TextInput ref={emailRef} autoFocus={authMode === 'login'} autoCapitalize="none" keyboardType={authMode === 'create' ? 'email-address' : 'default'} value={email} onChangeText={text => { setEmail(text); setAuthError(''); }} onSubmitEditing={() => passwordRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder={authMode === 'login' ? 'Email or username' : 'Email'} placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />
+              <TextInput ref={passwordRef} secureTextEntry value={password} onChangeText={text => { setPassword(text); setAuthError(''); }} onSubmitEditing={() => authMode === 'create' ? passwordConfirmRef.current?.focus() : submitAuth()} returnKeyType={authMode === 'create' ? 'next' : 'done'} blurOnSubmit={authMode !== 'create'} placeholder="Password" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />
+              {authMode === 'create' && <TextInput ref={passwordConfirmRef} secureTextEntry value={passwordConfirm} onChangeText={text => { setPasswordConfirm(text); setAuthError(''); }} onSubmitEditing={() => submitAuth()} returnKeyType="done" placeholder="Repeat password" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />}
               {!!authError && <Text style={authError.startsWith('Account created') ? [s.infoText, accentTheme.text] : s.errorText}>{authError}</Text>}
               <Pressable onPress={() => { setAuthMode(authMode === 'login' ? 'create' : 'login'); setAuthError(''); }}>
                 <Text style={[s.switchAuth, accentTheme.text]}>{authMode === 'login' ? 'New here? Create an account' : 'Already have an account? Log in'}</Text>
@@ -1573,56 +1625,63 @@ export default function App() {
       </Animated.View>
     </SafeAreaView>
     </AccentContext.Provider>
+    </ThemeContext.Provider>
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = (C: Palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg }, page: { paddingHorizontal: 20, paddingTop: 0, paddingBottom: 112, gap: 28 },
   universalHeader: { width: '100%', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.bg, zIndex: 20 }, universalHeaderDesktop: { maxWidth: 1180, alignSelf: 'center', paddingHorizontal: 32 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, eyebrow: { color: C.green, fontSize: 11, fontWeight: '800', letterSpacing: 1.8, marginBottom: 7 },
-  title: { color: C.text, fontSize: 30, lineHeight: 36, fontWeight: '800', letterSpacing: -0.8 }, loginButton: { borderWidth: 1, borderColor: '#727272', borderRadius: 99, paddingHorizontal: 18, paddingVertical: 9 }, loginButtonText: { color: C.text, fontSize: 12, fontWeight: '800' }, avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.raised, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, avatarImage: { width: '100%', height: '100%' }, avatarText: { color: C.text, fontWeight: '800', fontSize: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, eyebrow: { color: readableAccent(C.green, C), fontSize: 11, fontWeight: '800', letterSpacing: 1.8, marginBottom: 7 },
+  title: { color: C.text, fontSize: 30, lineHeight: 36, fontWeight: '800', letterSpacing: -0.8 }, loginButton: { borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 18, paddingVertical: 9 }, loginButtonText: { color: C.text, fontSize: 12, fontWeight: '800' }, avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.raised, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }, avatarImage: { width: '100%', height: '100%' }, avatarText: { color: C.text, fontWeight: '800', fontSize: 12 },
   hero: { minHeight: 142, padding: 20, borderRadius: 12, backgroundColor: C.raised, flexDirection: 'row', alignItems: 'center' }, record: { width: 70, height: 70, borderRadius: 8, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center', marginRight: 16 },
   recordRing: { position: 'absolute', width: 45, height: 45, borderRadius: 23, borderWidth: 2, borderColor: '#0d6f31' }, recordDot: { width: 13, height: 13, borderRadius: 7, backgroundColor: '#0d6f31', borderWidth: 3, borderColor: C.green },
   heroCopy: { flex: 1 }, overline: { color: C.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 5 }, heroTitle: { color: C.text, fontSize: 23, fontWeight: '800' }, muted: { color: C.muted, fontSize: 13, marginTop: 3 },
-  live: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#173b24', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 }, liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.green }, liveText: { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  live: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.surface, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 5 }, liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.green }, liveText: { color: readableAccent(C.green, C), fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   section: { gap: 13 }, sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, sectionTitle: { color: C.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.25 },
-  presetRow: { gap: 8, paddingRight: 8 }, preset: { minHeight: 43, borderRadius: 99, borderWidth: 1, borderColor: '#727272', flexDirection: 'row', alignItems: 'center', overflow: 'hidden' }, presetActive: { backgroundColor: C.green, borderColor: C.green },
+  presetRow: { gap: 8, paddingRight: 8 }, preset: { minHeight: 43, borderRadius: 99, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', overflow: 'hidden' }, presetActive: { backgroundColor: C.green, borderColor: C.green },
   presetName: { paddingHorizontal: 16, paddingVertical: 11 }, customPreset: { paddingHorizontal: 16, paddingVertical: 11 }, presetText: { color: C.text, fontSize: 14, fontWeight: '700' }, presetTextActive: { color: C.bg, fontWeight: '800' },
-  deleteHeaderButton: { minWidth: 102, alignItems: 'center', borderWidth: 1, borderColor: '#7f7f7f', borderRadius: 99, paddingHorizontal: 13, paddingVertical: 7 }, deleteHeaderText: { color: C.text, fontSize: 11, fontWeight: '800' },
+  deleteHeaderButton: { minWidth: 102, alignItems: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 13, paddingVertical: 7 }, deleteHeaderText: { color: C.text, fontSize: 11, fontWeight: '800' },
   saveHeaderButton: { minWidth: 102, alignItems: 'center', backgroundColor: C.green, borderWidth: 1, borderColor: C.green, borderRadius: 99, paddingHorizontal: 13, paddingVertical: 7 }, saveHeaderText: { color: C.bg, fontSize: 11, fontWeight: '800' },
-  guestBadge: { minWidth: 102, alignItems: 'center', paddingVertical: 8 }, guestBadgeText: { color: '#777', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  guestBadge: { minWidth: 102, alignItems: 'center', paddingVertical: 8 }, guestBadgeText: { color: C.subtle, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
   panel: { backgroundColor: C.surface, borderRadius: 12, padding: 18, gap: 22 }, panelHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 2 }, helper: { color: C.muted, fontSize: 13, marginTop: 5 },
-  customPill: { backgroundColor: '#173b24', borderRadius: 99, paddingHorizontal: 9, paddingVertical: 6 }, customText: { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
+  customPill: { backgroundColor: C.surface, borderRadius: 99, paddingHorizontal: 9, paddingVertical: 6 }, customText: { color: readableAccent(C.green, C), fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   control: { gap: 5 }, controlTop: { flexDirection: 'row', justifyContent: 'space-between' }, controlLabel: { color: C.text, fontSize: 14, fontWeight: '700' }, controlValue: { color: C.muted, fontSize: 13, fontVariant: ['tabular-nums'] },
   touchTrack: { height: 30, justifyContent: 'center' }, track: { height: 4, borderRadius: 99, backgroundColor: C.line }, fill: { height: '100%', borderRadius: 99, backgroundColor: C.green }, thumb: { position: 'absolute', width: 16, height: 16, borderRadius: 8, backgroundColor: C.text, top: -6, marginLeft: -8 },
-  outputHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: -4 }, outputValue: { color: C.green, fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  footer: { color: '#6a6a6a', fontSize: 12, textAlign: 'center', marginTop: -10 }, pressed: { opacity: 0.72 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,.72)', justifyContent: 'center', padding: 24 }, accountDialog: { maxHeight: '92%', borderRadius: 12 }, dialog: { backgroundColor: '#282828', borderRadius: 12, padding: 24, gap: 14 },
-  dialogTitle: { color: C.text, fontSize: 23, fontWeight: '800' }, dialogCopy: { color: C.muted, fontSize: 14, lineHeight: 20 }, input: { height: 50, borderWidth: 1, borderColor: '#777', borderRadius: 5, paddingHorizontal: 14, color: C.text, backgroundColor: '#333', fontSize: 16 },
+  outputHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: -4 }, outputValue: { color: readableAccent(C.green, C), fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  footer: { color: C.subtle, fontSize: 12, textAlign: 'center', marginTop: -10 }, pressed: { opacity: 0.72 },
+  modalBackdrop: { flex: 1, backgroundColor: C.backdrop, justifyContent: 'center', padding: 24 }, accountDialog: { maxHeight: '92%', borderRadius: 12 }, dialog: { backgroundColor: C.dialog, borderRadius: 12, padding: 24, gap: 14 },
+  dialogTitle: { color: C.text, fontSize: 23, fontWeight: '800' }, dialogCopy: { color: C.muted, fontSize: 14, lineHeight: 20 }, input: { height: 50, borderWidth: 1, borderColor: C.border, borderRadius: 5, paddingHorizontal: 14, color: C.text, backgroundColor: C.input, fontSize: 16 },
   dialogActions: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 12, marginTop: 4 }, cancel: { paddingHorizontal: 14, paddingVertical: 11 }, cancelText: { color: C.text, fontWeight: '700' }, confirm: { backgroundColor: C.green, borderRadius: 99, paddingHorizontal: 24, paddingVertical: 12 }, confirmText: { color: C.bg, fontWeight: '800' }, disabled: { opacity: 0.35 },
-  deleteConfirm: { backgroundColor: '#e91429', borderRadius: 99, paddingHorizontal: 24, paddingVertical: 12 }, deleteConfirmText: { color: C.text, fontWeight: '800' },
-  errorText: { color: '#ff6b6b', fontSize: 13 }, infoText: { color: C.green, fontSize: 13, lineHeight: 18 }, switchAuth: { color: C.green, fontSize: 13, fontWeight: '700' }, fieldLabel: { color: C.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: -7 }, photoPicker: { alignItems: 'center', gap: 9, marginVertical: 2 }, photoPreview: { width: 76, height: 76, borderRadius: 38 }, photoFallback: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#3a3a3a', alignItems: 'center', justifyContent: 'center' }, photoInitials: { color: C.text, fontSize: 21, fontWeight: '800' }, photoAction: { color: C.green, fontSize: 13, fontWeight: '800' }, removePhotoButton: { alignSelf: 'center', marginTop: -8, paddingHorizontal: 12, paddingVertical: 5 }, removePhotoText: { color: '#ff6574', fontSize: 12, fontWeight: '700' }, logoutButton: { borderWidth: 1, borderColor: '#e91429', borderRadius: 99, paddingHorizontal: 16, paddingVertical: 11 }, logoutText: { color: '#ff6574', fontWeight: '800' }, actionSpacer: { flex: 1 },
-  deleteAccountLink: { alignSelf: 'flex-start', paddingVertical: 4 }, deleteAccountLinkText: { color: '#ff6574', fontSize: 13, fontWeight: '800' },
-  emailComparison: { backgroundColor: '#333', borderRadius: 8, padding: 14, gap: 5 }, emailCaption: { color: '#888', fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 3 }, enteredEmail: { color: C.text, fontSize: 14, fontWeight: '700', marginBottom: 7 }, suggestedEmail: { color: C.green, fontSize: 14, fontWeight: '800' },
-  colorSettingsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 }, colorPreview: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#eee', shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 6 }, colorInput: { flex: 1 }, colorPickerDialog: { alignSelf: 'center', width: '100%', maxWidth: 340, alignItems: 'center' }, colorWheel: { position: 'relative', alignSelf: 'center', marginVertical: 4 }, hueDot: { position: 'absolute', width: 14, height: 14, borderRadius: 7 }, hueCursor: { position: 'absolute', width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: '#fff', backgroundColor: 'transparent', zIndex: 4, shadowColor: '#000', shadowOpacity: 0.7, shadowRadius: 3 }, shadeSquare: { position: 'absolute', overflow: 'hidden', borderRadius: 5, zIndex: 5, borderWidth: 1, borderColor: '#777' }, shadeCursor: { position: 'absolute', width: 16, height: 16, borderRadius: 8, borderWidth: 3, borderColor: '#fff', backgroundColor: 'transparent', shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 3 }, colorPickerValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }, colorPickerValuePreview: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: '#fff' }, colorPickerValue: { color: C.text, fontSize: 13, fontWeight: '900', letterSpacing: 1 }, colorPickerDone: { alignSelf: 'stretch', alignItems: 'center' },
+  deleteConfirm: { backgroundColor: '#e91429', borderRadius: 99, paddingHorizontal: 24, paddingVertical: 12 }, deleteConfirmText: { color: '#ffffff', fontWeight: '800' },
+  errorText: { color: C.danger, fontSize: 13 }, infoText: { color: readableAccent(C.green, C), fontSize: 13, lineHeight: 18 }, switchAuth: { color: readableAccent(C.green, C), fontSize: 13, fontWeight: '700' }, fieldLabel: { color: C.muted, fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: -7 }, photoPicker: { alignItems: 'center', gap: 9, marginVertical: 2 }, photoPreview: { width: 76, height: 76, borderRadius: 38 }, photoFallback: { width: 76, height: 76, borderRadius: 38, backgroundColor: C.raised, alignItems: 'center', justifyContent: 'center' }, photoInitials: { color: C.text, fontSize: 21, fontWeight: '800' }, photoAction: { color: readableAccent(C.green, C), fontSize: 13, fontWeight: '800' }, removePhotoButton: { alignSelf: 'center', marginTop: -8, paddingHorizontal: 12, paddingVertical: 5 }, removePhotoText: { color: C.danger, fontSize: 12, fontWeight: '700' }, logoutButton: { borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 16, paddingVertical: 11 }, logoutText: { color: C.danger, fontWeight: '800' }, actionSpacer: { flex: 1 },
+  deleteAccountLink: { alignSelf: 'flex-start', paddingVertical: 4 }, deleteAccountLinkText: { color: C.danger, fontSize: 13, fontWeight: '800' },
+  emailComparison: { backgroundColor: C.input, borderRadius: 8, padding: 14, gap: 5 }, emailCaption: { color: C.secondary, fontSize: 9, fontWeight: '800', letterSpacing: 1, marginTop: 3 }, enteredEmail: { color: C.text, fontSize: 14, fontWeight: '700', marginBottom: 7 }, suggestedEmail: { color: readableAccent(C.green, C), fontSize: 14, fontWeight: '800' },
+  colorSettingsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 }, colorPreview: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: C.border, shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.35, shadowRadius: 6 }, colorInput: { flex: 1 }, colorPickerDialog: { alignSelf: 'center', width: '100%', maxWidth: 340, alignItems: 'center' }, colorWheel: { position: 'relative', alignSelf: 'center', marginVertical: 4 }, hueDot: { position: 'absolute', width: 14, height: 14, borderRadius: 7 }, hueCursor: { position: 'absolute', width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: '#fff', backgroundColor: 'transparent', zIndex: 4, shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.7, shadowRadius: 3 }, shadeSquare: { position: 'absolute', overflow: 'hidden', borderRadius: 5, zIndex: 5, borderWidth: 1, borderColor: '#777' }, shadeCursor: { position: 'absolute', width: 16, height: 16, borderRadius: 8, borderWidth: 3, borderColor: '#fff', backgroundColor: 'transparent', shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.8, shadowRadius: 3 }, colorPickerValueRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }, colorPickerValuePreview: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: C.border }, colorPickerValue: { color: C.text, fontSize: 13, fontWeight: '900', letterSpacing: 1 }, colorPickerDone: { alignSelf: 'stretch', alignItems: 'center' },
   useSuggestionButton: { minHeight: 46, borderRadius: 99, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 }, useSuggestionText: { color: C.bg, fontSize: 13, fontWeight: '800' },
-  savedToast: { position: 'absolute', bottom: 24, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#282828', borderRadius: 99, paddingHorizontal: 18, paddingVertical: 11, shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 }, savedToastDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green }, savedToastText: { color: C.text, fontSize: 13, fontWeight: '800' },
+  savedToast: { position: 'absolute', bottom: 24, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.dialog, borderRadius: 99, paddingHorizontal: 18, paddingVertical: 11, shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.35, shadowRadius: 12, elevation: 8 }, savedToastDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green }, savedToastText: { color: C.text, fontSize: 13, fontWeight: '800' },
   screen: { flex: 1 }, pagerViewport: { flex: 1, overflow: 'hidden' }, pagerTrack: { flex: 1, flexDirection: 'row' }, pagerPage: { height: '100%' }, edgeButton: { position: 'absolute', top: 0, bottom: 78, width: 36, zIndex: 40 }, edgeButtonLeft: { left: 0 }, edgeButtonRight: { right: 0 }, pageDesktop: { width: '100%', maxWidth: 920, alignSelf: 'center', paddingBottom: 110 },
-  appNav: { position: 'absolute', bottom: 14, height: 64, backgroundColor: '#202020', borderWidth: 1, borderColor: '#383838', borderRadius: 32, zIndex: 999, elevation: 50, padding: 6, shadowColor: '#000', shadowOpacity: 0.75, shadowRadius: 20 }, appNavDesktop: { width: 270, left: '50%', marginLeft: -135 }, appNavMobile: { left: '14%', right: '14%' }, navTabs: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  appNav: { position: 'absolute', bottom: 14, height: 64, backgroundColor: C.dialog, borderWidth: 1, borderColor: C.border, borderRadius: 32, zIndex: 999, elevation: 50, padding: 6, shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.75, shadowRadius: 20 }, appNavDesktop: { width: 270, left: '50%', marginLeft: -135 }, appNavMobile: { left: '14%', right: '14%' }, navTabs: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
   navIndicator: { position: 'absolute', left: 0, height: 50, borderRadius: 26, backgroundColor: C.green },
   navItemTall: { height: 50 },
-  navItem: { flex: 1, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' }, navItemActive: { backgroundColor: C.green }, turntableNavIcon: { width: 38, height: 29, borderRadius: 5, borderWidth: 2, borderColor: '#aaa' }, navDeckActive: { borderColor: '#050505' }, equalizerNavIcon: { width: 34, height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }, navPlatter: { position: 'absolute', left: 4, top: 4, width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#aaa', alignItems: 'center', justifyContent: 'center' }, navPlatterLabel: { width: 8, height: 8, borderRadius: 4, borderWidth: 1, borderColor: '#aaa', alignItems: 'center', justifyContent: 'center' }, navSpindle: { width: 2, height: 2, borderRadius: 1, backgroundColor: '#aaa' }, navTonearmBase: { position: 'absolute', right: 5, top: 4, width: 7, height: 7, borderRadius: 4, borderWidth: 2, borderColor: '#aaa' }, navTonearm: { position: 'absolute', right: 10, top: 9, width: 2, height: 11, borderRadius: 2, backgroundColor: '#aaa', transform: [{ rotate: '36deg' }] }, navTonearmHead: { position: 'absolute', left: -2, bottom: -6, width: 5, height: 9, borderRadius: 2, backgroundColor: '#aaa', transform: [{ rotate: '8deg' }] }, navDeckButton: { position: 'absolute', right: 4, bottom: 4, width: 3, height: 3, borderRadius: 2, backgroundColor: '#aaa' }, navFaderColumn: { width: 6, height: 28, alignItems: 'center' }, navFaderTrack: { position: 'absolute', top: 2, bottom: 2, width: 2, borderRadius: 1, backgroundColor: '#aaa' }, navFaderKnob: { position: 'absolute', left: 0, width: 6, height: 7, borderRadius: 3, backgroundColor: '#202020', borderWidth: 2, borderColor: '#aaa' }, navFaderKnobActive: { backgroundColor: '#050505', borderColor: '#050505' }, navIconShapeActive: { borderColor: '#050505' }, navIconSolidActive: { backgroundColor: '#050505' },
+  navItem: { flex: 1, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' }, navItemActive: { backgroundColor: C.green }, turntableNavIcon: { width: 38, height: 29, borderRadius: 5, borderWidth: 2, borderColor: C.muted }, navDeckActive: { borderColor: C.border }, equalizerNavIcon: { width: 34, height: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }, navPlatter: { position: 'absolute', left: 4, top: 4, width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: C.muted, alignItems: 'center', justifyContent: 'center' }, navPlatterLabel: { width: 8, height: 8, borderRadius: 4, borderWidth: 1, borderColor: C.muted, alignItems: 'center', justifyContent: 'center' }, navSpindle: { width: 2, height: 2, borderRadius: 1, backgroundColor: C.muted }, navTonearmBase: { position: 'absolute', right: 5, top: 4, width: 7, height: 7, borderRadius: 4, borderWidth: 2, borderColor: C.muted }, navTonearm: { position: 'absolute', right: 10, top: 9, width: 2, height: 11, borderRadius: 2, backgroundColor: C.muted, transform: [{ rotate: '36deg' }] }, navTonearmHead: { position: 'absolute', left: -2, bottom: -6, width: 5, height: 9, borderRadius: 2, backgroundColor: C.muted, transform: [{ rotate: '8deg' }] }, navDeckButton: { position: 'absolute', right: 4, bottom: 4, width: 3, height: 3, borderRadius: 2, backgroundColor: C.muted }, navFaderColumn: { width: 6, height: 28, alignItems: 'center' }, navFaderTrack: { position: 'absolute', top: 2, bottom: 2, width: 2, borderRadius: 1, backgroundColor: C.muted }, navFaderKnob: { position: 'absolute', left: 0, width: 6, height: 7, borderRadius: 3, backgroundColor: C.surface, borderWidth: 2, borderColor: C.muted }, navFaderKnobActive: { backgroundColor: C.surface, borderColor: C.border }, navIconShapeActive: { borderColor: C.border }, navIconSolidActive: { backgroundColor: C.surface },
   musicPage: { paddingHorizontal: 16, paddingTop: 0, paddingBottom: 104 }, musicPageDesktop: { width: '100%', maxWidth: 1180, alignSelf: 'center', paddingHorizontal: 32, paddingBottom: 110 }, musicHeader: { marginBottom: 22 }, musicLayout: { gap: 24 }, musicLayoutDesktop: { flexDirection: 'row', alignItems: 'center', gap: 36 },
   deckColumn: { width: '100%', alignItems: 'center', gap: 7 }, deckColumnDesktop: { flex: 1.02, maxWidth: 610 },
-  deck: { position: 'relative', aspectRatio: 45 / 35, borderRadius: 10, backgroundColor: '#151515', borderWidth: 1, borderColor: '#353535', overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 24, elevation: 12 }, deckMobile: { width: '90%', alignSelf: 'center' }, deckDesktop: { width: '100%', maxWidth: 590 }, deckBrand: { position: 'absolute', left: '3.5%', top: '3.8%', zIndex: 8 }, deckBrandText: { color: '#ddd', fontSize: 9, fontWeight: '900', letterSpacing: 1.6 }, deckModel: { color: '#696969', fontSize: 6, letterSpacing: 0.8 },
-  coverArc: { width: '94%', height: 154, marginTop: -28, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 15 }, coverArcMobile: { width: '100%', height: 124, marginTop: -20, paddingTop: 12 }, coverSleeve: { width: 132, height: 132, borderRadius: 4, overflow: 'hidden', backgroundColor: '#242424', borderWidth: 1, borderColor: '#484848', shadowColor: '#000', shadowOpacity: 0.75, shadowRadius: 10, elevation: 5 }, coverSleeveMobile: { width: 102, height: 102 }, coverOverlap: { marginLeft: -24 }, coverSleeveHovered: { borderColor: C.green, shadowColor: C.green, shadowOpacity: 0.8, shadowRadius: 14, elevation: 12 }, coverPressed: { opacity: 0.72 }, coverArtwork: { width: '100%', height: '100%' }, coverFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#282828' }, coverRecord: { width: '70%', height: '70%', borderRadius: 999, backgroundColor: '#101010', borderWidth: 1, borderColor: '#3b3b3b', alignItems: 'center', justifyContent: 'center' }, coverRecordLabel: { width: '28%', height: '28%', borderRadius: 999, backgroundColor: '#686868' }, coverShade: { position: 'absolute', inset: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  platterShadow: { position: 'absolute', width: '67%', aspectRatio: 1, borderRadius: 999, left: '3.5%', top: '8%', backgroundColor: '#050505', borderWidth: 5, borderColor: '#242424', shadowColor: '#000', shadowOpacity: 0.9, shadowRadius: 14, zIndex: 3, elevation: 3 }, platterShadowMobile: { borderWidth: 3 }, vinyl: { position: 'absolute', width: '62%', aspectRatio: 1, borderRadius: 999, left: '6%', top: '10.7%', backgroundColor: '#090909', alignItems: 'center', justifyContent: 'center', zIndex: 4, elevation: 4 }, vinylMobile: {},
+  deck: { position: 'relative', aspectRatio: 45 / 35, borderRadius: 10, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, overflow: 'hidden', shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.8, shadowRadius: 24, elevation: 12 }, deckMobile: { width: '90%', alignSelf: 'center' }, deckDesktop: { width: '100%', maxWidth: 590 }, deckBrand: { position: 'absolute', left: '3.5%', top: '3.8%', zIndex: 8 }, deckBrandText: { color: C.text, fontSize: 9, fontWeight: '900', letterSpacing: 1.6 }, deckModel: { color: C.subtle, fontSize: 6, letterSpacing: 0.8 },
+  coverArc: { width: '94%', height: 154, marginTop: -28, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 15 }, coverArcMobile: { width: '100%', height: 124, marginTop: -20, paddingTop: 12 }, coverSleeve: { width: 132, height: 132, borderRadius: 4, overflow: 'hidden', backgroundColor: C.raised, borderWidth: 1, borderColor: C.border, shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.75, shadowRadius: 10, elevation: 5 }, coverSleeveMobile: { width: 102, height: 102 }, coverOverlap: { marginLeft: -24 }, coverSleeveHovered: { borderColor: C.green, shadowColor: C.green, shadowOpacity: C.mode === 'light' ? 0.14 : 0.8, shadowRadius: 14, elevation: 12 }, coverPressed: { opacity: 0.72 }, coverArtwork: { width: '100%', height: '100%' }, coverFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: C.raised }, coverRecord: { width: '70%', height: '70%', borderRadius: 999, backgroundColor: '#101010', borderWidth: 1, borderColor: '#3b3b3b', alignItems: 'center', justifyContent: 'center' }, coverRecordLabel: { width: '28%', height: '28%', borderRadius: 999, backgroundColor: '#686868' }, coverShade: { position: 'absolute', inset: 0, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  platterShadow: { position: 'absolute', width: '67%', aspectRatio: 1, borderRadius: 999, left: '3.5%', top: '8%', backgroundColor: '#050505', borderWidth: 5, borderColor: '#242424', shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.9, shadowRadius: 14, zIndex: 3, elevation: 3 }, platterShadowMobile: { borderWidth: 3 }, vinyl: { position: 'absolute', width: '62%', aspectRatio: 1, borderRadius: 999, left: '6%', top: '10.7%', backgroundColor: '#090909', alignItems: 'center', justifyContent: 'center', zIndex: 4, elevation: 4 }, vinylMobile: {},
   grooveOne: { width: '88%', aspectRatio: 1, borderRadius: 999, borderWidth: 1, borderColor: '#242424', alignItems: 'center', justifyContent: 'center' }, grooveOneMobile: {}, grooveTwo: { width: '78%', aspectRatio: 1, borderRadius: 999, borderWidth: 1, borderColor: '#202020', alignItems: 'center', justifyContent: 'center' }, grooveTwoMobile: {}, grooveThree: { width: '76%', aspectRatio: 1, borderRadius: 999, borderWidth: 1, borderColor: '#282828' }, grooveThreeMobile: {},
   vinylLabel: { position: 'absolute', width: '36%', aspectRatio: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', padding: 14, overflow: 'hidden' }, vinylLabelMobile: { padding: 8 }, vinylLabelTitle: { color: '#080808', fontSize: 10, lineHeight: 12, fontWeight: '900', textAlign: 'center' }, vinylLabelTitleMobile: { fontSize: 7, lineHeight: 8 }, curvedLabelCharacter: { position: 'absolute', color: '#090909', fontSize: 7, lineHeight: 9, fontWeight: '900' }, curvedLabelCharacterMobile: { fontSize: 5, lineHeight: 7 }, recordArtwork: { position: 'absolute', width: '100%', height: '100%' }, spindle: { position: 'absolute', width: 6, height: 6, borderRadius: 3, backgroundColor: '#eee' }, strobeLight: { position: 'absolute', left: '4.5%', bottom: '6%', width: 8, height: 8, borderRadius: 4, backgroundColor: '#e34837', borderWidth: 1, borderColor: '#ff8a7d', shadowColor: '#ff4d3a', shadowOpacity: 1, shadowRadius: 9, boxShadow: '0 0 9px rgba(255,77,58,0.95)' }, strobeLightConnected: { backgroundColor: C.green, borderColor: '#8dffb5', shadowColor: C.green, boxShadow: '0 0 9px rgba(30,215,96,0.95)' },
-  armBase: { position: 'absolute', width: '30%', aspectRatio: 1, borderRadius: 999, right: '7%', top: '7%', backgroundColor: '#111', borderWidth: 4, borderColor: '#333', alignItems: 'center', justifyContent: 'center', zIndex: 1, elevation: 1, shadowColor: '#000', shadowOpacity: 0.9, shadowRadius: 8 }, armBaseMobile: { borderWidth: 3 }, armBaseInner: { width: '63%', aspectRatio: 1, borderRadius: 999, backgroundColor: '#5f5f5f', borderWidth: 4, borderColor: '#1d1d1d', alignItems: 'center', justifyContent: 'center' }, pivotCap: { width: '42%', aspectRatio: 1, borderRadius: 999, backgroundColor: '#c3c3c3', borderWidth: 2, borderColor: '#777' }, tonearmWrap: { position: 'absolute', width: '14%', height: '68%', right: '15%', top: '21.5%', zIndex: 7, elevation: 7, transformOrigin: 'center top' }, tonearmWrapMobile: {}, counterweight: { position: 'absolute', left: '2%', top: '-10%', width: '96%', height: '21%', borderRadius: 10, backgroundColor: '#292929', borderWidth: 2, borderColor: '#555', overflow: 'hidden' }, counterweightMobile: {}, counterweightRing: { position: 'absolute', left: '25%', top: -2, bottom: -2, width: '13%', backgroundColor: '#aaa', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#dedede' }, tonearm: { position: 'absolute', left: '45%', top: '6%', width: 7, height: '78%', borderRadius: 4, backgroundColor: '#d5d5d5', borderWidth: 1, borderColor: '#858585' }, tonearmMobile: { width: 5 }, armCollar: { position: 'absolute', left: -3, top: '5%', width: 11, height: 20, borderRadius: 5, backgroundColor: '#343434', borderWidth: 1, borderColor: '#858585' }, cartridge: { position: 'absolute', left: -7, bottom: -40, width: 21, height: 50, borderRadius: 3, backgroundColor: '#bdbdbd', borderWidth: 1, borderColor: '#686868' }, headshellSlot: { position: 'absolute', left: 6, top: 7, width: 7, height: 25, borderRadius: 4, backgroundColor: '#242424' }, fingerLift: { position: 'absolute', right: -10, top: 8, width: 13, height: 3, borderRadius: 2, backgroundColor: '#bdbdbd', transform: [{ rotate: '-12deg' }] }, stylusTip: { position: 'absolute', left: 6, bottom: -6, width: 8, height: 9, borderRadius: 1, backgroundColor: '#242424', borderBottomWidth: 3, borderBottomColor: '#d23b32' }, armHint: { position: 'absolute', right: '3%', bottom: '2.5%', color: '#686868', fontSize: 8, fontWeight: '700' },
-  playerPanel: { gap: 24, paddingHorizontal: 8 }, playerPanelDesktop: { flex: 0.98, minWidth: 320, maxWidth: 470, paddingHorizontal: 0, marginBottom: 50 }, lyricsWindow: { minHeight: 190, borderRadius: 12, overflow: 'hidden', padding: 18, backgroundColor: '#181818', borderWidth: 1, borderColor: '#303030', gap: 16 }, lyricsWindowDesktop: { minHeight: 254 }, lyricsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, lyricsKicker: { color: C.text, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 }, lyricsPreviewBadge: { color: '#777', fontSize: 8, fontWeight: '900', letterSpacing: 1, borderWidth: 1, borderColor: '#444', borderRadius: 99, paddingHorizontal: 7, paddingVertical: 4, transform: [{ translateY: -5 }] }, lyricsLines: { gap: 8 }, lyricsFaded: { color: '#666', fontSize: 13, lineHeight: 18, fontWeight: '600' }, lyricsActive: { color: C.green, fontSize: 15, lineHeight: 20, fontWeight: '900' }, lyricsUpcoming: { color: '#aaa', fontSize: 13, lineHeight: 18, fontWeight: '600' }, trackCopy: { alignItems: 'flex-start' }, trackKicker: { color: C.green, fontSize: 9, fontWeight: '900', letterSpacing: 1.4, marginBottom: 8 }, trackTitle: { color: C.text, fontSize: 28, fontWeight: '900', letterSpacing: -0.7 }, trackArtist: { color: C.muted, fontSize: 14, marginTop: 6 }, seekTouch: { height: 24, justifyContent: 'center' }, progressTrack: { height: 4, borderRadius: 99, backgroundColor: '#484848' }, progressFill: { height: '100%', borderRadius: 99, backgroundColor: C.green }, seekThumb: { position: 'absolute', top: -4, width: 12, height: 12, marginLeft: -6, borderRadius: 6, backgroundColor: '#fff' }, timeRow: { flexDirection: 'row', justifyContent: 'space-between' }, timeText: { color: '#858585', fontSize: 10, fontVariant: ['tabular-nums'] }, playbackControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 30 }, skipButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }, skipText: { color: C.text, fontSize: 28, fontWeight: '700' }, playButton: { width: 64, height: 64, borderRadius: 32, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' }, playText: { color: C.bg, fontSize: 24, fontWeight: '900', marginLeft: 2 }, spotifySettingsLink: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 5 }, spotifySettingsLinkText: { color: C.muted, fontSize: 11, fontWeight: '800' }, spotifySettingsArrow: { color: C.green, fontSize: 18, lineHeight: 18 }, spotifyError: { color: '#ff8585', fontSize: 11, lineHeight: 16, marginTop: -14 },
-  lyricsPreviewBadgeText: { color: '#777', fontSize: 8, fontWeight: '900', letterSpacing: 1 }, lyricsViewport: { height: 96, overflow: 'hidden' }, lyricsViewportDesktop: { height: 160 }, rollingLyrics: { gap: 6 }, rollingLyricLine: { height: 20, color: '#aaa', fontSize: 13, lineHeight: 20, fontWeight: '600' }, lyricsActiveStable: { fontSize: 13, lineHeight: 18 },
+  armBase: { position: 'absolute', width: '30%', aspectRatio: 1, borderRadius: 999, right: '7%', top: '7%', backgroundColor: '#111', borderWidth: 4, borderColor: '#333', alignItems: 'center', justifyContent: 'center', zIndex: 1, elevation: 1, shadowColor: '#000', shadowOpacity: C.mode === 'light' ? 0.14 : 0.9, shadowRadius: 8 }, armBaseMobile: { borderWidth: 3 }, armBaseInner: { width: '63%', aspectRatio: 1, borderRadius: 999, backgroundColor: '#5f5f5f', borderWidth: 4, borderColor: '#1d1d1d', alignItems: 'center', justifyContent: 'center' }, pivotCap: { width: '42%', aspectRatio: 1, borderRadius: 999, backgroundColor: '#c3c3c3', borderWidth: 2, borderColor: '#777' }, tonearmWrap: { position: 'absolute', width: '14%', height: '68%', right: '15%', top: '21.5%', zIndex: 7, elevation: 7, transformOrigin: 'center top' }, tonearmWrapMobile: {}, counterweight: { position: 'absolute', left: '2%', top: '-10%', width: '96%', height: '21%', borderRadius: 10, backgroundColor: '#292929', borderWidth: 2, borderColor: '#555', overflow: 'hidden' }, counterweightMobile: {}, counterweightRing: { position: 'absolute', left: '25%', top: -2, bottom: -2, width: '13%', backgroundColor: '#aaa', borderLeftWidth: 1, borderRightWidth: 1, borderColor: '#dedede' }, tonearm: { position: 'absolute', left: '45%', top: '6%', width: 7, height: '78%', borderRadius: 4, backgroundColor: '#d5d5d5', borderWidth: 1, borderColor: '#858585' }, tonearmMobile: { width: 5 }, armCollar: { position: 'absolute', left: -3, top: '5%', width: 11, height: 20, borderRadius: 5, backgroundColor: '#343434', borderWidth: 1, borderColor: '#858585' }, cartridge: { position: 'absolute', left: -7, bottom: -40, width: 21, height: 50, borderRadius: 3, backgroundColor: '#bdbdbd', borderWidth: 1, borderColor: '#686868' }, headshellSlot: { position: 'absolute', left: 6, top: 7, width: 7, height: 25, borderRadius: 4, backgroundColor: '#242424' }, fingerLift: { position: 'absolute', right: -10, top: 8, width: 13, height: 3, borderRadius: 2, backgroundColor: '#bdbdbd', transform: [{ rotate: '-12deg' }] }, stylusTip: { position: 'absolute', left: 6, bottom: -6, width: 8, height: 9, borderRadius: 1, backgroundColor: '#242424', borderBottomWidth: 3, borderBottomColor: '#d23b32' }, armHint: { position: 'absolute', right: '3%', bottom: '2.5%', color: C.subtle, fontSize: 8, fontWeight: '700' },
+  playerPanel: { gap: 24, paddingHorizontal: 8 }, playerPanelDesktop: { flex: 0.98, minWidth: 320, maxWidth: 470, paddingHorizontal: 0, marginBottom: 50 }, lyricsWindow: { minHeight: 190, borderRadius: 12, overflow: 'hidden', padding: 18, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, gap: 16 }, lyricsWindowDesktop: { minHeight: 254 }, lyricsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, lyricsKicker: { color: C.text, fontSize: 11, fontWeight: '900', letterSpacing: 1.4 }, lyricsPreviewBadge: { color: C.subtle, fontSize: 8, fontWeight: '900', letterSpacing: 1, borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 7, paddingVertical: 4, transform: [{ translateY: -5 }] }, lyricsLines: { gap: 8 }, lyricsFaded: { color: C.subtle, fontSize: 13, lineHeight: 18, fontWeight: '600' }, lyricsActive: { color: readableAccent(C.green, C), fontSize: 15, lineHeight: 20, fontWeight: '900' }, lyricsUpcoming: { color: C.secondary, fontSize: 13, lineHeight: 18, fontWeight: '600' }, trackCopy: { alignItems: 'flex-start' }, trackKicker: { color: readableAccent(C.green, C), fontSize: 9, fontWeight: '900', letterSpacing: 1.4, marginBottom: 8 }, trackTitle: { color: C.text, fontSize: 28, fontWeight: '900', letterSpacing: -0.7 }, trackArtist: { color: C.muted, fontSize: 14, marginTop: 6 }, seekTouch: { height: 24, justifyContent: 'center' }, progressTrack: { height: 4, borderRadius: 99, backgroundColor: C.raised }, progressFill: { height: '100%', borderRadius: 99, backgroundColor: C.green }, seekThumb: { position: 'absolute', top: -4, width: 12, height: 12, marginLeft: -6, borderRadius: 6, backgroundColor: C.text }, timeRow: { flexDirection: 'row', justifyContent: 'space-between' }, timeText: { color: C.subtle, fontSize: 10, fontVariant: ['tabular-nums'] }, playbackControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 30 }, skipButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }, skipText: { color: C.text, fontSize: 28, fontWeight: '700' }, playButton: { width: 64, height: 64, borderRadius: 32, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' }, playText: { color: C.bg, fontSize: 24, fontWeight: '900', marginLeft: 2 }, spotifySettingsLink: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 5 }, spotifySettingsLinkText: { color: C.muted, fontSize: 11, fontWeight: '800' }, spotifySettingsArrow: { color: readableAccent(C.green, C), fontSize: 18, lineHeight: 18 }, spotifyError: { color: C.danger, fontSize: 11, lineHeight: 16, marginTop: -14 },
+  lyricsPreviewBadgeText: { color: C.subtle, fontSize: 8, fontWeight: '900', letterSpacing: 1 }, lyricsViewport: { height: 96, overflow: 'hidden' }, lyricsViewportDesktop: { height: 160 }, rollingLyrics: { gap: 6 }, rollingLyricLine: { height: 20, color: C.secondary, fontSize: 13, lineHeight: 20, fontWeight: '600' }, lyricsActiveStable: { fontSize: 13, lineHeight: 18 },
   pauseIcon: { flexDirection: 'row', alignItems: 'center', gap: 5 }, pauseBar: { width: 5, height: 20, borderRadius: 2, backgroundColor: C.bg }, playTriangle: { width: 0, height: 0, marginLeft: 3, borderTopWidth: 11, borderBottomWidth: 11, borderLeftWidth: 17, borderTopColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: C.bg }, skipIcon: { flexDirection: 'row', alignItems: 'center', gap: 3 }, skipStem: { width: 3, height: 19, borderRadius: 2, backgroundColor: C.text }, skipTriangleLeft: { width: 0, height: 0, borderTopWidth: 9, borderBottomWidth: 9, borderRightWidth: 13, borderTopColor: 'transparent', borderBottomColor: 'transparent', borderRightColor: C.text }, skipTriangleRight: { width: 0, height: 0, borderTopWidth: 9, borderBottomWidth: 9, borderLeftWidth: 13, borderTopColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: C.text },
-  spotifyAccountSection: { minHeight: 66, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: '#202020', borderWidth: 1, borderColor: '#3b3b3b', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, spotifyAccountCopy: { flex: 1, gap: 4 }, spotifyAccountTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, spotifyAccountDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#e34837' }, spotifyAccountDotConnected: { backgroundColor: C.green }, spotifyAccountTitle: { color: C.text, fontSize: 14, fontWeight: '800' }, spotifyAccountStatus: { color: C.muted, fontSize: 11 }, spotifyAccountButton: { borderRadius: 99, backgroundColor: C.green, paddingHorizontal: 16, paddingVertical: 9 }, spotifyAccountButtonText: { color: C.bg, fontSize: 11, fontWeight: '900' }, spotifyAccountDisconnect: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#777' }, spotifyAccountDisconnectText: { color: C.text },
-  sessionSection: { borderRadius: 9, padding: 14, backgroundColor: '#202020', borderWidth: 1, borderColor: '#3b3b3b', gap: 12 }, sessionActiveRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, sessionRole: { color: C.text, fontSize: 14, fontWeight: '800' }, sessionCode: { color: C.green, fontSize: 13, fontWeight: '900', letterSpacing: 1.4, marginTop: 4 }, sessionHelp: { color: C.muted, fontSize: 11, lineHeight: 16 }, sessionLeaveButton: { borderWidth: 1, borderColor: '#777', borderRadius: 99, paddingHorizontal: 15, paddingVertical: 8 }, sessionLeaveText: { color: C.text, fontSize: 11, fontWeight: '800' }, sessionHostButton: { minHeight: 42, borderRadius: 99, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' }, sessionHostText: { color: C.bg, fontSize: 12, fontWeight: '900' }, sessionJoinRow: { flexDirection: 'row', gap: 9 }, sessionCodeInput: { flex: 1, height: 43, borderWidth: 1, borderColor: '#666', borderRadius: 6, paddingHorizontal: 12, color: C.text, fontSize: 13, fontWeight: '800', letterSpacing: 1.2 }, sessionJoinButton: { minWidth: 70, borderRadius: 99, borderWidth: 1, borderColor: C.green, alignItems: 'center', justifyContent: 'center' }, sessionJoinText: { color: C.green, fontSize: 12, fontWeight: '900' },
+  spotifyAccountSection: { minHeight: 66, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 11, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, spotifyAccountCopy: { flex: 1, gap: 4 }, spotifyAccountTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, spotifyAccountDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.surface }, spotifyAccountDotConnected: { backgroundColor: C.green }, spotifyAccountTitle: { color: C.text, fontSize: 14, fontWeight: '800' }, spotifyAccountStatus: { color: C.muted, fontSize: 11 }, spotifyAccountButton: { borderRadius: 99, backgroundColor: C.green, paddingHorizontal: 16, paddingVertical: 9 }, spotifyAccountButtonText: { color: C.bg, fontSize: 11, fontWeight: '900' }, spotifyAccountDisconnect: { backgroundColor: 'transparent', borderWidth: 1, borderColor: C.border }, spotifyAccountDisconnectText: { color: C.text },
+  sessionSection: { borderRadius: 9, padding: 14, backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, gap: 12 }, sessionActiveRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }, sessionRole: { color: C.text, fontSize: 14, fontWeight: '800' }, sessionCode: { color: readableAccent(C.green, C), fontSize: 13, fontWeight: '900', letterSpacing: 1.4, marginTop: 4 }, sessionHelp: { color: C.muted, fontSize: 11, lineHeight: 16 }, sessionLeaveButton: { borderWidth: 1, borderColor: C.border, borderRadius: 99, paddingHorizontal: 15, paddingVertical: 8 }, sessionLeaveText: { color: C.text, fontSize: 11, fontWeight: '800' }, sessionHostButton: { minHeight: 42, borderRadius: 99, backgroundColor: C.green, alignItems: 'center', justifyContent: 'center' }, sessionHostText: { color: C.bg, fontSize: 12, fontWeight: '900' }, sessionJoinRow: { flexDirection: 'row', gap: 9 }, sessionCodeInput: { flex: 1, height: 43, borderWidth: 1, borderColor: C.border, borderRadius: 6, paddingHorizontal: 12, color: C.text, fontSize: 13, fontWeight: '800', letterSpacing: 1.2 }, sessionJoinButton: { minWidth: 70, borderRadius: 99, borderWidth: 1, borderColor: C.green, alignItems: 'center', justifyContent: 'center' }, sessionJoinText: { color: readableAccent(C.green, C), fontSize: 12, fontWeight: '900' },
 });
+
+function useAppStyles() {
+  const theme = useTheme();
+  const accent = useContext(AccentContext);
+  return useMemo(() => contrastStyles(accent, createStyles(theme)), [accent, theme]);
+}
