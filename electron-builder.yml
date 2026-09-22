@@ -1,0 +1,22 @@
+appId: com.btturntable.app
+productName: BT Turntable
+
+directories:
+  output: release
+
+files:
+  - dist/**/*
+  - electron/**/*
+
+extraMetadata:
+  main: electron/main.cjs
+
+win:
+  target:
+    - target: portable
+      arch:
+        - x64
+
+artifactName: BT-Turntable-${version}-${arch}.${ext}
+
+npmRebuild: false
