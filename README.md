@@ -25,7 +25,26 @@ Signed-in users save this choice to Supabase account metadata
 No database migration is required. Guests use dark mode; signing in restores
 the account preference.
 
-## Spotify login and listening stats
+## Guitar tabs
+
+The Guitar page sits immediately left of Playback. Auto-sync searches for the
+current song and artist, then opens an exact public guitar-tab match (or chords
+if no matching tab is available). You can select another version, change text
+size, or turn auto-sync off to keep reading the selected song. Submitting a
+manual search also turns auto-sync off. Playback progress does not move the tab.
+
+The adapter reads Ultimate Guitar's public web pages, so site format changes
+or provider restrictions can interrupt lookup. It supports public text Tabs
+and Chords; unavailable versions link to the original site. Results are cached
+for ten minutes in memory, with a source link and contributor attribution in
+the reader. Song titles and artists are sent to Ultimate Guitar only when the
+Guitar page is active and a search is needed.
+
+Checks: `node --experimental-strip-types --test lib/guitar.test.mjs` and
+`node --experimental-strip-types scripts/guitar-smoke.mjs` (the latter uses
+the live site and prints metadata only).
+
+## Spotify setup
 
 Run [`supabase/listening-rankings.sql`](supabase/listening-rankings.sql) once in
 the Supabase SQL Editor to enable account-wide listening chart history.

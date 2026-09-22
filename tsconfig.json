@@ -5,6 +5,7 @@
     "jsx": "react-jsx",
     "moduleResolution": "bundler"
   },
+  "exclude": ["supabase/functions"],
   "include": [
     "**/*.ts",
     "**/*.tsx"

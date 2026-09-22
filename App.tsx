@@ -11,6 +11,7 @@ import {
 import { supabase } from './lib/supabase';
 import { coverColor } from './lib/cover-color';
 import { StatsPage } from './lib/StatsPage';
+import { GuitarPage } from './lib/GuitarPage';
 import { palettes, Palette, ThemeContext, ThemeMode, useTheme, readableAccent } from './lib/theme';
 import { loadSpotifyToken, refreshSpotifyToken, saveSpotifyToken, spotifyApi, spotifyDiscovery, spotifyScopes, SpotifyToken } from './lib/spotify';
 
@@ -22,6 +23,9 @@ if (Platform.OS === 'web') {
 }
 
 const C = palettes.dark;
+const PAGES = ['guitar', 'music', 'eq', 'stats'] as const;
+type Page = typeof PAGES[number];
+const adjacentPage = (page: Page, direction: number): Page => PAGES[Math.max(0, Math.min(PAGES.length - 1, PAGES.indexOf(page) + direction))];
 const AccentContext = createContext<string>(C.green);
 const accentForeground = (hex: string) => {
   const channels = [1, 3, 5].map(index => {
@@ -525,10 +529,10 @@ export default function App() {
     ? process.env.EXPO_PUBLIC_SPOTIFY_REDIRECT_URI?.trim() || `${window.location.origin}/spotify-callback`
     : AuthSession.makeRedirectUri({ scheme: 'soundscape-login', path: 'callback', native: 'soundscape-login://callback' });
   const [spotifyRequest, spotifyResponse, promptSpotify] = AuthSession.useAuthRequest({ clientId: spotifyClientId, responseType: AuthSession.ResponseType.Code, redirectUri: spotifyRedirectUri, scopes: spotifyScopes, usePKCE: true }, spotifyDiscovery);
-  const [page, setPage] = useState<'music' | 'eq' | 'stats'>('eq');
+  const [page, setPage] = useState<Page>('eq');
   const [navWidth, setNavWidth] = useState(0);
-  const pagerX = useRef(new Animated.Value(-width)).current;
-  const pagerLatest = useRef({ page: 'eq' as 'music' | 'eq' | 'stats', width });
+  const pagerX = useRef(new Animated.Value(-width * PAGES.indexOf('eq'))).current;
+  const pagerLatest = useRef({ page: 'eq' as Page, width });
   pagerLatest.current = { page, width };
   const [playing, setPlaying] = useState(false);
   const [trackIndex, setTrackIndex] = useState(0);
@@ -1247,23 +1251,23 @@ export default function App() {
     setAuthOpen(false);
     resetAuthForm();
   };
-  const animateToPage = (target: 'music' | 'eq' | 'stats') => {
+  const animateToPage = (target: Page) => {
     setPage(target);
-    Animated.spring(pagerX, { toValue: -['music', 'eq', 'stats'].indexOf(target) * pagerLatest.current.width, useNativeDriver: true, tension: 70, friction: 11 }).start();
+    Animated.spring(pagerX, { toValue: -PAGES.indexOf(target) * pagerLatest.current.width, useNativeDriver: true, tension: 70, friction: 11 }).start();
   };
-  useEffect(() => { pagerX.setValue(-['music', 'eq', 'stats'].indexOf(page) * width); }, [width]);
+  useEffect(() => { pagerX.setValue(-PAGES.indexOf(page) * width); }, [width]);
   const leftEdgePan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => pagerX.stopAnimation(),
     onPanResponderMove: (_event, gesture) => {
-      const index = ['music', 'eq', 'stats'].indexOf(pagerLatest.current.page);
+      const index = PAGES.indexOf(pagerLatest.current.page);
       const pageWidth = pagerLatest.current.width;
       pagerX.setValue(Math.max(-index * pageWidth, Math.min(-(index - 1) * pageWidth, -index * pageWidth + gesture.dx)));
     },
     onPanResponderRelease: (_event, gesture) => {
       const click = Math.abs(gesture.dx) < 8 && Math.abs(gesture.dy) < 8;
-      animateToPage(click || gesture.dx > 40 || gesture.vx > 0.45 ? pagerLatest.current.page === 'stats' ? 'eq' : 'music' : pagerLatest.current.page);
+      animateToPage(click || gesture.dx > 40 || gesture.vx > 0.45 ? adjacentPage(pagerLatest.current.page, -1) : pagerLatest.current.page);
     },
     onPanResponderTerminate: () => animateToPage(pagerLatest.current.page),
   })).current;
@@ -1272,20 +1276,23 @@ export default function App() {
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => pagerX.stopAnimation(),
     onPanResponderMove: (_event, gesture) => {
-      const index = ['music', 'eq', 'stats'].indexOf(pagerLatest.current.page);
+      const index = PAGES.indexOf(pagerLatest.current.page);
       const pageWidth = pagerLatest.current.width;
       pagerX.setValue(Math.max(-(index + 1) * pageWidth, Math.min(-index * pageWidth, -index * pageWidth + gesture.dx)));
     },
     onPanResponderRelease: (_event, gesture) => {
       const click = Math.abs(gesture.dx) < 8 && Math.abs(gesture.dy) < 8;
-      animateToPage(click || gesture.dx < -40 || gesture.vx < -0.45 ? pagerLatest.current.page === 'music' ? 'eq' : 'stats' : pagerLatest.current.page);
+      animateToPage(click || gesture.dx < -40 || gesture.vx < -0.45 ? adjacentPage(pagerLatest.current.page, 1) : pagerLatest.current.page);
     },
     onPanResponderTerminate: () => animateToPage(pagerLatest.current.page),
   })).current;
   const navigation = (
     <View style={[s.appNav, compact ? s.appNavMobile : s.appNavDesktop, Platform.OS === 'web' && ({ position: 'fixed' } as any)]}>
       <View onLayout={event => setNavWidth(event.nativeEvent.layout.width)} style={s.navTabs}>
-        {navWidth > 0 && <Animated.View pointerEvents="none" style={[s.navIndicator, accentTheme.background, { width: (navWidth - 8) / 3, transform: [{ translateX: pagerX.interpolate({ inputRange: [-width * 2, 0], outputRange: [(navWidth + 4) * 2 / 3, 0], extrapolate: 'clamp' }) }] }]} />}
+        {navWidth > 0 && <Animated.View pointerEvents="none" style={[s.navIndicator, accentTheme.background, { width: (navWidth - 4 * (PAGES.length - 1)) / PAGES.length, transform: [{ translateX: pagerX.interpolate({ inputRange: [-width * (PAGES.length - 1), 0], outputRange: [(navWidth + 4) * (PAGES.length - 1) / PAGES.length, 0], extrapolate: 'clamp' }) }] }]} />}
+        <Pressable accessibilityRole="button" accessibilityLabel="Guitar tabs" accessibilityState={{ selected: page === 'guitar' }} onPress={() => animateToPage('guitar')} style={[s.navItem, s.navItemTall]}>
+          <Text style={{ color: page === 'guitar' ? accentForeground(accent) : theme.muted, fontSize: 14, fontWeight: '900', letterSpacing: 1 }}>TAB</Text>
+        </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel="Music" onPress={() => animateToPage('music')} style={[s.navItem, s.navItemTall]}>
           <TurntableNavIcon active={page === 'music'} />
         </Pressable>
@@ -1314,8 +1321,8 @@ export default function App() {
   const appHeader = (
     <View style={[s.universalHeader, !compact && s.universalHeaderDesktop]}>
       <View>
-              <Text style={[s.eyebrow, accentTheme.text, (theme.mode === 'dark' ? accentHeadingGlow(accentText) : {})]}>{page === 'music' ? 'PLAYBACK' : page === 'stats' ? 'YOUR LISTENING' : 'SOUND PROFILE'}</Text>
-        <Text style={s.title}>{page === 'music' ? 'Turntable' : page === 'stats' ? 'On Record' : 'Soundscape'}</Text>
+              <Text style={[s.eyebrow, accentTheme.text, (theme.mode === 'dark' ? accentHeadingGlow(accentText) : {})]}>{page === 'guitar' ? 'PLAY ALONG' : page === 'music' ? 'PLAYBACK' : page === 'stats' ? 'YOUR LISTENING' : 'SOUND PROFILE'}</Text>
+        <Text style={s.title}>{page === 'guitar' ? 'Guitar' : page === 'music' ? 'Turntable' : page === 'stats' ? 'On Record' : 'Soundscape'}</Text>
       </View>
       {user ? (
         <Pressable accessibilityLabel="Open account" onPress={openAccount} style={({ pressed }) => [s.avatar, pressed && s.pressed]}>
@@ -1336,7 +1343,10 @@ export default function App() {
       <StatusBar style={themeMode === 'light' ? 'dark' : 'light'} />
       {appHeader}
       <View style={s.pagerViewport}>
-        <Animated.View style={[s.pagerTrack, { width: width * 3, transform: [{ translateX: pagerX }] }]}>
+        <Animated.View style={[s.pagerTrack, { width: width * PAGES.length, transform: [{ translateX: pagerX }] }]}>
+          <View style={[s.pagerPage, { width }]}>
+            <GuitarPage key={user?.id ?? 'guest'} active={page === 'guitar'} compact={compact} accent={accent} foreground={accentForeground(accent)} track={spotifyTrack} accountId={user?.id} onSignIn={openAccount} />
+          </View>
           <View style={[s.pagerPage, { width }]}>
             <MusicPage
               playing={playing}
@@ -1421,8 +1431,8 @@ export default function App() {
               onConnect={authorizeSpotify} authError={spotifyAuthError} />
           </View>
         </Animated.View>
-        {page !== 'music' && <View accessible accessibilityRole="button" accessibilityLabel={page === 'stats' ? 'Open sound page' : 'Open music page'} onAccessibilityTap={() => animateToPage(page === 'stats' ? 'eq' : 'music')} {...leftEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonLeft]} />}
-        {page !== 'stats' && <View accessible accessibilityRole="button" accessibilityLabel={page === 'music' ? 'Open sound page' : 'Open stats page'} onAccessibilityTap={() => animateToPage(page === 'music' ? 'eq' : 'stats')} {...rightEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonRight]} />}
+        {page !== 'guitar' && <View accessible accessibilityRole="button" accessibilityLabel={`Open ${adjacentPage(page, -1)} page`} onAccessibilityTap={() => animateToPage(adjacentPage(page, -1))} {...leftEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonLeft]} />}
+        {page !== 'stats' && <View accessible accessibilityRole="button" accessibilityLabel={`Open ${adjacentPage(page, 1)} page`} onAccessibilityTap={() => animateToPage(adjacentPage(page, 1))} {...rightEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonRight]} />}
       </View>
       {navigation}
 
