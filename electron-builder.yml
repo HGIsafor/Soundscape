@@ -1,0 +1,16 @@
+appId: com.soundscape.desktop
+productName: Soundscape
+extraMetadata:
+  main: electron/main.cjs
+directories:
+  output: release
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - '!node_modules/**/*'
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

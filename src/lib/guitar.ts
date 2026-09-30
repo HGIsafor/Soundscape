@@ -1,5 +1,5 @@
-import type { GuitarResult } from '../supabase/functions/_shared/ultimate-guitar';
-export type { GuitarResult, GuitarTab } from '../supabase/functions/_shared/ultimate-guitar';
+import type { GuitarResult } from '../../supabase/functions/_shared/ultimate-guitar';
+export type { GuitarResult, GuitarTab } from '../../supabase/functions/_shared/ultimate-guitar';
 
 export const cleanSongTitle = (title: string) => title
   .replace(/\s*\((?:[^)]*\b(?:remaster(?:ed)?|live|mono|stereo|radio edit)\b[^)]*)\)/gi, '')

@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { chordShape } from './chord-shapes';
-import { songChords } from './guitar';
-import { useTheme } from './theme';
+import { chordShape } from '../lib/chord-shapes';
+import { songChords } from '../lib/guitar';
+import { useTheme } from '../theme/theme';
 
 export function ChordDiagrams({ content, tuning }: { content: string; tuning: string }) {
   const theme = useTheme();

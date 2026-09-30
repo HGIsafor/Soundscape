@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseSearch, parseTab, validTabUrl, decodeEntities } from '../supabase/functions/_shared/ultimate-guitar.ts';
-import { bestGuitarMatch, capoLabel, cleanSongTitle, guitarSearchUrl, transposeChord, transposeContent } from './guitar.ts';
+import { parseSearch, parseTab, validTabUrl, decodeEntities } from '../../supabase/functions/_shared/ultimate-guitar.ts';
+import { bestGuitarMatch, capoLabel, cleanSongTitle, guitarSearchUrl, transposeChord, transposeContent } from '../../src/lib/guitar.ts';
 
 const row = { id: 123, song_name: 'Example Song', artist_name: 'Example Artist', type: 'Tabs', tab_access_type: 'public', tab_url: 'https://tabs.ultimate-guitar.com/tab/example-artist/example-song-tabs-123', votes: 10, rating: 4.5, version: 2 };
 const page = data => `<div class="js-store" data-content="${JSON.stringify({ store: { page: { data } } }).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></div>`;

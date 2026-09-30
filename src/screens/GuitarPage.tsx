@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { supabase } from './supabase';
-import { bestGuitarMatch, capoLabel, cleanSongTitle, guitarSearchUrl, transposeContent } from './guitar';
-import type { GuitarResult, GuitarTab } from './guitar';
-import { Palette, readableAccent, useTheme } from './theme';
-import { ChordDiagrams } from './ChordDiagrams';
+import { supabase } from '../lib/supabase';
+import { bestGuitarMatch, capoLabel, cleanSongTitle, guitarSearchUrl, transposeContent } from '../lib/guitar';
+import type { GuitarResult, GuitarTab } from '../lib/guitar';
+import { Palette, readableAccent, useTheme } from '../theme/theme';
+import { ChordDiagrams } from '../components/ChordDiagrams';
 
 type Track = { title: string; artist: string; artwork?: string };
 type Search = { query: string; track?: Track; attempt: number };

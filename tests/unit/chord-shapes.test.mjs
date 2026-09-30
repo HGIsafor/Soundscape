@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chordShape } from './chord-shapes.ts';
-import { songChords, transposeContent } from './guitar.ts';
+import { chordShape } from '../../src/lib/chord-shapes.ts';
+import { songChords, transposeContent } from '../../src/lib/guitar.ts';
 
 test('the reference chords have the expected string positions', () => {
   const expected = { Em: [0,2,2,0,0,0], G: [3,2,0,0,0,3], Am: [-1,0,2,2,1,0], C: [-1,3,2,0,1,0], Bm: [-1,2,4,4,3,2], D: [-1,-1,0,2,3,2] };
