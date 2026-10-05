@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PlaybackPage } from './screens/PlaybackPage';
 import { SoundscapePage } from './screens/SoundscapePage';
 import { ColorWheel } from './components/ColorWheel';
@@ -36,7 +37,8 @@ if (Platform.OS === 'web') {
 const C = palettes.dark;
 const PAGES = ['guitar', 'music', 'eq', 'stats'] as const;
 type Page = typeof PAGES[number];
-const adjacentPage = (page: Page, direction: number): Page => PAGES[Math.max(0, Math.min(PAGES.length - 1, PAGES.indexOf(page) + direction))];
+const adjacentPage = (pages: readonly Page[], page: Page, direction: number): Page => pages[Math.max(0, Math.min(pages.length - 1, pages.indexOf(page) + direction))];
+const GUITAR_TABS_KEY = 'soundscape.guitar-tabs.enabled';
 const initials = (name: string) => name.trim().split(/\s+/).filter(Boolean).map(word => word[0]).join('').toUpperCase() || '?';
 const EMAIL_TYPOS: Record<string, string> = { 'gmai.com': 'gmail.com', 'gmial.com': 'gmail.com', 'gmal.com': 'gmail.com', 'gmail.co': 'gmail.com', 'hotnail.com': 'hotmail.com', 'outlok.com': 'outlook.com', 'yaho.com': 'yahoo.com' };
 export default function App() {
@@ -45,6 +47,8 @@ export default function App() {
   const [miniPlayerNotice, setMiniPlayerNotice] = useState('');
   const [miniPlayerEnabled, setMiniPlayerEnabled] = useState(true);
   const [accountTab, setAccountTab] = useState<'profile' | 'settings'>('profile');
+  const [guitarTabsEnabled, setGuitarTabsEnabled] = useState(true);
+  const visiblePages: readonly Page[] = guitarTabsEnabled ? PAGES : PAGES.filter(item => item !== 'guitar');
   const compact = width < 760;
   const [themeSaving, setThemeSaving] = useState(false);
   const [themeError, setThemeError] = useState('');
@@ -56,9 +60,9 @@ export default function App() {
   const [page, setPage] = useState<Page>('eq');
   const [navWidth, setNavWidth] = useState(0);
   const spin = useRef(new Animated.Value(0)).current;
-  const pagerX = useRef(new Animated.Value(-width * PAGES.indexOf('eq'))).current;
-  const pagerLatest = useRef({ page: 'eq' as Page, width });
-  pagerLatest.current = { page, width };
+  const pagerX = useRef(new Animated.Value(-width * visiblePages.indexOf('eq'))).current;
+  const pagerLatest = useRef({ page: 'eq' as Page, width, pages: visiblePages });
+  pagerLatest.current = { page, width, pages: visiblePages };
   const [playing, setPlaying] = useState(false);
   const [trackIndex, setTrackIndex] = useState(0);
   const [spotifyToken, setSpotifyToken] = useState<SpotifyToken | null>(null);
@@ -76,6 +80,11 @@ export default function App() {
   const [customValues, setCustomValues] = useState<Values>({ ...DEFAULTS[1].values });
   const [sliderTransition, setSliderTransition] = useState(0);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [profileOverwriteId, setProfileOverwriteId] = useState<string | null>(null);
+  const [profilePickerOpen, setProfilePickerOpen] = useState(false);
+  const [profileUpdating, setProfileUpdating] = useState(false);
+  const profileUpdatePending = useRef(false);
+  const [profileError, setProfileError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
   const [name, setName] = useState('');
   const [user, setUser] = useState<Account | null>(null);
@@ -144,6 +153,12 @@ export default function App() {
     document.documentElement.style.backgroundColor = theme.bg;
     document.body.style.backgroundColor = theme.bg;
   }, [themeMode, theme]);
+  useEffect(() => { void AsyncStorage.getItem(GUITAR_TABS_KEY).then(value => { if (value !== null) setGuitarTabsEnabled(value === 'true'); }).catch(() => {}); }, []);
+  const changeGuitarTabs = (enabled: boolean) => {
+    setGuitarTabsEnabled(enabled);
+    if (!enabled && pagerLatest.current.page === 'guitar') { setPage('music'); pagerX.setValue(0); }
+    void AsyncStorage.setItem(GUITAR_TABS_KEY, String(enabled)).catch(() => {});
+  };
   const changeTheme = async (next: ThemeMode) => {
     if (themeSaving || next === themeMode) return;
     setThemeError('');
@@ -632,13 +647,34 @@ export default function App() {
 
   const selected = profiles.find(p => p.id === selectedId);
   const summary = useMemo(() => values.bass > values.treble + 10 ? 'Deep and warm' : values.treble > values.bass + 10 ? 'Crisp and bright' : 'Clean and balanced', [values]);
-  const choose = (profile: Profile) => { setSelectedId(profile.id); setValues({ ...profile.values }); setSliderTransition(current => current + 1); };
-  const chooseCustom = () => { setSelectedId('custom'); setValues({ ...customValues }); setSliderTransition(current => current + 1); };
+  const choose = (profile: Profile) => { setProfileError(''); setSelectedId(profile.id); setValues({ ...profile.values }); setSliderTransition(current => current + 1); };
+  const chooseCustom = () => { setProfileError(''); setSelectedId('custom'); setValues({ ...customValues }); setSliderTransition(current => current + 1); };
   const update = (key: keyof Values, value: number) => {
     const next = { ...values, [key]: value };
     setCustomValues(next);
     setValues(next);
+    setProfileError('');
     setSelectedId('custom');
+  };
+  const updateProfile = async (id: string) => {
+    if (!user || !profiles.some(profile => profile.id === id) || profileUpdatePending.current) return;
+    const snapshot = { ...values };
+    profileUpdatePending.current = true;
+    setProfileUpdating(true);
+    setProfileError('');
+    try {
+      const { error } = await supabase.from('sound_profiles').update(snapshot).eq('id', id).eq('user_id', user.id).select('id').single();
+      if (error) throw error;
+      setProfiles(current => current.map(profile => profile.id === id ? { ...profile, values: snapshot } : profile));
+      setSelectedId(id);
+      setProfilePickerOpen(false);
+      showSaved();
+    } catch {
+      setProfileError('Could not update this profile. Please try again.');
+    } finally {
+      profileUpdatePending.current = false;
+      setProfileUpdating(false);
+    }
   };
   const remove = async (id: string) => {
     if (!user) return;
@@ -779,21 +815,25 @@ export default function App() {
   const animateToPage = (target: Page) => {
     if (pagerLatest.current.page === 'music' && target !== 'music') miniPlayer.current?.leavingPlayback();
     setPage(target);
-    Animated.spring(pagerX, { toValue: -PAGES.indexOf(target) * pagerLatest.current.width, useNativeDriver: true, tension: 70, friction: 11 }).start();
+    Animated.spring(pagerX, { toValue: -pagerLatest.current.pages.indexOf(target) * pagerLatest.current.width, useNativeDriver: true, tension: 70, friction: 11 }).start();
   };
-  useEffect(() => { pagerX.setValue(-PAGES.indexOf(page) * width); }, [width]);
+  useEffect(() => {
+    if (!visiblePages.includes(page)) setPage('music');
+    const target = visiblePages.includes(page) ? page : 'music';
+    pagerX.setValue(-visiblePages.indexOf(target) * width);
+  }, [width, guitarTabsEnabled, page]);
   const leftEdgePan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => pagerX.stopAnimation(),
     onPanResponderMove: (_event, gesture) => {
-      const index = PAGES.indexOf(pagerLatest.current.page);
+      const index = pagerLatest.current.pages.indexOf(pagerLatest.current.page);
       const pageWidth = pagerLatest.current.width;
       pagerX.setValue(Math.max(-index * pageWidth, Math.min(-(index - 1) * pageWidth, -index * pageWidth + layoutDistance(gesture.dx))));
     },
     onPanResponderRelease: (_event, gesture) => {
       const click = Math.abs(gesture.dx) < 8 && Math.abs(gesture.dy) < 8;
-      animateToPage(click || gesture.dx > 40 || gesture.vx > 0.45 ? adjacentPage(pagerLatest.current.page, -1) : pagerLatest.current.page);
+      animateToPage(click || gesture.dx > 40 || gesture.vx > 0.45 ? adjacentPage(pagerLatest.current.pages, pagerLatest.current.page, -1) : pagerLatest.current.page);
     },
     onPanResponderTerminate: () => animateToPage(pagerLatest.current.page),
   })).current;
@@ -802,23 +842,23 @@ export default function App() {
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: () => pagerX.stopAnimation(),
     onPanResponderMove: (_event, gesture) => {
-      const index = PAGES.indexOf(pagerLatest.current.page);
+      const index = pagerLatest.current.pages.indexOf(pagerLatest.current.page);
       const pageWidth = pagerLatest.current.width;
       pagerX.setValue(Math.max(-(index + 1) * pageWidth, Math.min(-index * pageWidth, -index * pageWidth + layoutDistance(gesture.dx))));
     },
     onPanResponderRelease: (_event, gesture) => {
       const click = Math.abs(gesture.dx) < 8 && Math.abs(gesture.dy) < 8;
-      animateToPage(click || gesture.dx < -40 || gesture.vx < -0.45 ? adjacentPage(pagerLatest.current.page, 1) : pagerLatest.current.page);
+      animateToPage(click || gesture.dx < -40 || gesture.vx < -0.45 ? adjacentPage(pagerLatest.current.pages, pagerLatest.current.page, 1) : pagerLatest.current.page);
     },
     onPanResponderTerminate: () => animateToPage(pagerLatest.current.page),
   })).current;
   const navigation = (
     <View style={[s.appNav, compact ? s.appNavMobile : s.appNavDesktop, Platform.OS === 'web' && ({ position: 'fixed' } as any)]}>
       <View onLayout={event => setNavWidth(event.nativeEvent.layout.width)} style={s.navTabs}>
-        {navWidth > 0 && <Animated.View pointerEvents="none" style={[s.navIndicator, accentTheme.background, { width: (navWidth - 4 * (PAGES.length - 1)) / PAGES.length, transform: [{ translateX: pagerX.interpolate({ inputRange: [-width * (PAGES.length - 1), 0], outputRange: [(navWidth + 4) * (PAGES.length - 1) / PAGES.length, 0], extrapolate: 'clamp' }) }] }]} />}
-        <Pressable accessibilityRole="button" accessibilityLabel="Guitar tabs" accessibilityState={{ selected: page === 'guitar' }} onPress={() => animateToPage('guitar')} style={[s.navItem, s.navItemTall]}>
+        {navWidth > 0 && <Animated.View pointerEvents="none" style={[s.navIndicator, accentTheme.background, { width: (navWidth - 4 * (visiblePages.length - 1)) / visiblePages.length, transform: [{ translateX: pagerX.interpolate({ inputRange: [-width * (visiblePages.length - 1), 0], outputRange: [(navWidth + 4) * (visiblePages.length - 1) / visiblePages.length, 0], extrapolate: 'clamp' }) }] }]} />}
+        {guitarTabsEnabled && <Pressable accessibilityRole="button" accessibilityLabel="Guitar tabs" accessibilityState={{ selected: page === 'guitar' }} onPress={() => animateToPage('guitar')} style={[s.navItem, s.navItemTall]}>
           <Text style={{ color: page === 'guitar' ? accentForeground(accent) : theme.muted, fontSize: 14, fontWeight: '900', letterSpacing: 1 }}>TAB</Text>
-        </Pressable>
+        </Pressable>}
         <Pressable accessibilityRole="button" accessibilityLabel="Music" onPress={() => animateToPage('music')} style={[s.navItem, s.navItemTall]}>
           <TurntableNavIcon active={page === 'music'} />
         </Pressable>
@@ -877,10 +917,10 @@ export default function App() {
       <StatusBar style={themeMode === 'light' ? 'dark' : 'light'} />
       {appHeader}
       <View style={s.pagerViewport}>
-        <Animated.View style={[s.pagerTrack, { width: width * PAGES.length, transform: [{ translateX: pagerX }] }]}>
-          <View style={[s.pagerPage, { width }]}>
+        <Animated.View style={[s.pagerTrack, { width: width * visiblePages.length, transform: [{ translateX: pagerX }] }]}>
+          {guitarTabsEnabled && <View style={[s.pagerPage, { width }]}>
             <GuitarPage key={user?.id ?? 'guest'} active={page === 'guitar'} compact={compact} accent={accent} foreground={accentForeground(accent)} track={spotifyTrack} accountId={user?.id} onSignIn={openAccount} />
-          </View>
+          </View>}
           <View style={[s.pagerPage, { width }]}>
             <PlaybackPage
               playing={playing}
@@ -903,6 +943,7 @@ export default function App() {
           <View style={[s.pagerPage, { width }]}>
             <SoundscapePage compact={compact} canManage={!!user} profiles={profiles} selected={selected} selectedId={selectedId}
               summary={summary} values={values} sliderTransition={sliderTransition} onSave={() => setSaveOpen(true)}
+              onUpdateProfile={() => { setProfileError(''); setProfileOverwriteId(null); setProfilePickerOpen(true); }} profileUpdating={profileUpdating}
               onDelete={setDeleteTarget} onChoose={choose} onChooseCustom={chooseCustom} onUpdate={update} />
           </View>
           <View style={[s.pagerPage, { width }]}>
@@ -911,8 +952,8 @@ export default function App() {
               onConnect={authorizeSpotify} authError={spotifyAuthError} />
           </View>
         </Animated.View>
-        {page !== 'guitar' && <View accessible accessibilityRole="button" accessibilityLabel={`Open ${adjacentPage(page, -1)} page`} onAccessibilityTap={() => animateToPage(adjacentPage(page, -1))} {...leftEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonLeft]} />}
-        {page !== 'stats' && <View accessible accessibilityRole="button" accessibilityLabel={`Open ${adjacentPage(page, 1)} page`} onAccessibilityTap={() => animateToPage(adjacentPage(page, 1))} {...rightEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonRight]} />}
+        {visiblePages.indexOf(page) > 0 && <View accessible accessibilityRole="button" accessibilityLabel={`Open ${adjacentPage(visiblePages, page, -1)} page`} onAccessibilityTap={() => animateToPage(adjacentPage(visiblePages, page, -1))} {...leftEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonLeft]} />}
+        {visiblePages.indexOf(page) < visiblePages.length - 1 && <View accessible accessibilityRole="button" accessibilityLabel={`Open ${adjacentPage(visiblePages, page, 1)} page`} onAccessibilityTap={() => animateToPage(adjacentPage(visiblePages, page, 1))} {...rightEdgePan.panHandlers} style={[s.edgeButton, s.edgeButtonRight]} />}
       </View>
       {navigation}
 
@@ -929,6 +970,29 @@ export default function App() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={profilePickerOpen && !!user} transparent animationType="fade" onRequestClose={() => { if (!profileUpdating) setProfilePickerOpen(false); }}>
+        <View style={s.modalBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} disabled={profileUpdating} onPress={() => setProfilePickerOpen(false)} />
+          <View style={[s.dialog, s.accountDialog]}>
+            <Text style={s.dialogTitle}>Update a profile</Text>
+            <Text style={s.dialogCopy}>Choose a profile, then press Overwrite to replace its sound settings. Its name stays the same.</Text>
+            <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
+              {profiles.map(profile => (
+                <Pressable key={profile.id} accessibilityRole="radio" accessibilityLabel={profile.name} accessibilityState={{ checked: profileOverwriteId === profile.id }} aria-checked={profileOverwriteId === profile.id} disabled={profileUpdating} onPress={() => { setProfileOverwriteId(profile.id); setProfileError(''); }} style={({ pressed }) => [s.preset, s.customPreset, { borderWidth: 2, borderColor: profileOverwriteId === profile.id ? accent : theme.border, backgroundColor: profileOverwriteId === profile.id ? colorAlpha(accent, 0.14) : 'transparent' }, profileUpdating && s.disabled, pressed && s.pressed]}>
+                  <Text style={s.presetText}>{profile.name}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            {profileUpdating && <Text accessibilityLiveRegion="polite" style={s.dialogCopy}>Updating profile...</Text>}
+            {!!profileError && <Text accessibilityLiveRegion="polite" style={s.errorText}>{profileError}</Text>}
+            <View style={s.dialogActions}>
+              <Pressable accessibilityRole="button" disabled={profileUpdating} onPress={() => setProfilePickerOpen(false)} style={[s.cancel, profileUpdating && s.disabled]}><Text style={s.cancelText}>Cancel</Text></Pressable>
+              <Pressable accessibilityRole="button" disabled={!profileOverwriteId || profileUpdating} onPress={() => profileOverwriteId && updateProfile(profileOverwriteId)} style={[s.confirm, accentTheme.background, (!profileOverwriteId || profileUpdating) && s.disabled]}><Text style={s.confirmText}>Overwrite</Text></Pressable>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       <Modal visible={!!deleteTarget} transparent animationType="fade" onRequestClose={() => setDeleteTarget(null)}>
@@ -967,6 +1031,14 @@ export default function App() {
                 <Switch accessibilityLabel="Dark mode" accessibilityHint="Saves your appearance to your account" value={themeMode === 'dark'} disabled={!user || themeSaving} onValueChange={enabled => changeTheme(enabled ? 'dark' : 'light')} trackColor={{ false: theme.line, true: accent }} thumbColor={themeMode === 'dark' ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
               </View>
               {!!themeError && <Text accessibilityLiveRegion="polite" style={s.errorText}>{themeError}</Text>}
+              <Text style={s.fieldLabel}>PAGES</Text>
+              <View style={s.sessionActiveRow}>
+                <View style={s.spotifyAccountCopy}>
+                  <Text style={s.spotifyAccountTitle}>Guitar tabs</Text>
+                  <Text style={s.spotifyAccountStatus}>Show the Guitar tabs page</Text>
+                </View>
+                <Switch accessibilityLabel="Guitar tabs" value={guitarTabsEnabled} onValueChange={changeGuitarTabs} trackColor={{ false: theme.line, true: accent }} thumbColor={guitarTabsEnabled ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
+              </View>
               <Text style={s.fieldLabel}>MINI PLAYER</Text>
               <View style={{ gap: 12 }}>
               {Platform.OS === 'web' && !compact ? <>
@@ -975,7 +1047,7 @@ export default function App() {
                   <Switch accessibilityLabel="Enable mini player" value={miniPlayerEnabled} onValueChange={enabled => miniPlayer.current?.setEnabled(enabled)} trackColor={{ false: theme.line, true: accent }} thumbColor={miniPlayerEnabled ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
                 </View>
                 <Text style={s.sessionHelp}>Opens when you leave Playback. Closing it dismisses it until you leave Playback again. Turn this off to keep it closed. This setting is saved on this device.</Text>
-                <Pressable accessibilityRole="button" accessibilityLabel="Open mini player" disabled={!miniPlayerEnabled} onPress={() => miniPlayer.current?.open()} style={[s.sessionHostButton, accentTheme.background, !miniPlayerEnabled && s.disabled]}><Text style={s.sessionHostText}>Open mini player</Text></Pressable>
+                <Pressable accessibilityRole="button" accessibilityLabel="Open mini player" disabled={!miniPlayerEnabled} onPress={() => miniPlayer.current?.open()} style={[s.sessionHostButton, { alignSelf: 'flex-start', minHeight: 0, paddingHorizontal: 14, paddingVertical: 7 }, accentTheme.background, !miniPlayerEnabled && s.disabled]}><Text style={s.sessionHostText}>Open mini player</Text></Pressable>
                 {!!miniPlayerNotice && <Text accessibilityLiveRegion="polite" style={s.dialogCopy}>{miniPlayerNotice}</Text>}
               </> : <Text style={s.sessionHelp}>The mini player is available in the desktop layout.</Text>}
               </View>

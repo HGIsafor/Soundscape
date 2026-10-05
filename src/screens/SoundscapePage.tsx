@@ -8,12 +8,13 @@ import type { Profile, Values } from '../types/app';
 
 type Props = {
   compact: boolean; canManage: boolean; profiles: Profile[]; selected?: Profile; selectedId: string;
+  onUpdateProfile: () => void; profileUpdating: boolean;
   summary: string; values: Values; sliderTransition: number;
   onSave: () => void; onDelete: (profile: Profile) => void; onChoose: (profile: Profile) => void;
   onChooseCustom: () => void; onUpdate: (key: keyof Values, value: number) => void;
 };
 
-export function SoundscapePage({ compact, canManage, profiles, selected, selectedId, summary, values, sliderTransition, onSave, onDelete, onChoose, onChooseCustom, onUpdate }: Props) {
+export function SoundscapePage({ compact, canManage, profiles, selected, selectedId, summary, values, sliderTransition, onSave, onUpdateProfile, profileUpdating, onDelete, onChoose, onChooseCustom, onUpdate }: Props) {
   const s = useAppStyles();
   const accent = useContext(AccentContext);
   const theme = useTheme();
@@ -33,16 +34,21 @@ export function SoundscapePage({ compact, canManage, profiles, selected, selecte
         </View>
 
         <View style={s.section}>
-          <View style={s.sectionHead}>
+          <View style={[s.sectionHead, { flexWrap: 'wrap', gap: 12 }]}>
             <Text style={s.sectionTitle}>Your sound profiles</Text>
             {canManage && selected ? (
-              <Pressable onPress={() => onDelete(selected)} style={({ pressed }) => [s.deleteHeaderButton, pressed && s.pressed]}>
+              <Pressable accessibilityRole="button" onPress={() => onDelete(selected)} style={({ pressed }) => [s.deleteHeaderButton, pressed && s.pressed]}>
                 <Text style={s.deleteHeaderText}>Delete profile</Text>
               </Pressable>
             ) : canManage ? (
-              <Pressable onPress={onSave} style={({ pressed }) => [s.saveHeaderButton, accentTheme.backgroundBorder, pressed && s.pressed]}>
-                <Text style={s.saveHeaderText}>Save profile</Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Pressable accessibilityRole="button" disabled={!profiles.length || profileUpdating} onPress={onUpdateProfile} style={({ pressed }) => [s.deleteHeaderButton, (!profiles.length || profileUpdating) && s.disabled, pressed && s.pressed]}>
+                  <Text style={s.deleteHeaderText}>Update profile</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" onPress={onSave} style={({ pressed }) => [s.saveHeaderButton, accentTheme.backgroundBorder, pressed && s.pressed]}>
+                  <Text style={s.saveHeaderText}>Save profile</Text>
+                </Pressable>
+              </View>
             ) : <View style={s.guestBadge}><Text style={s.guestBadgeText}>LOG IN TO MANAGE</Text></View>}
           </View>
           {profiles.length ? (
