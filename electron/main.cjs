@@ -1,132 +1,92 @@
-const { app, BrowserWindow } = require("electron");
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
+const { app, BrowserWindow, screen, shell } = require('electron');
+const path = require('node:path');
+const { startServer } = require('./server.cjs');
 
-const PORT = 41731;
+app.setName('Soundscape');
+const customData = app.commandLine.getSwitchValue('user-data-dir');
+if (customData) app.setPath('userData', path.resolve(customData));
 
-const mimeTypes = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-};
-
+let mainWindow;
+let miniWindow;
 let server;
+let origin;
+const secureWebPreferences = { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false };
 
-function startServer() {
-  const distPath = path.join(__dirname, "..", "dist");
+function miniBounds() {
+  const monitor = screen.getDisplayMatching(mainWindow.getBounds());
+  const area = monitor.workArea;
+  const margin = 24;
+  // 20% x 40% on a 16:9 monitor gives an 8:9 popup. Fit that shape on any screen.
+  const scale = Math.min(monitor.bounds.width * 0.2 / 8, monitor.bounds.height * 0.4 / 9,
+    Math.max(1, area.width - margin * 2) / 8, Math.max(1, area.height - margin * 2) / 9);
+  const width = Math.max(1, Math.round(8 * scale));
+  const height = Math.max(1, Math.round(9 * scale));
+  return { width, height, x: Math.max(area.x, area.x + area.width - width - margin), y: Math.max(area.y, area.y + area.height - height - margin) };
+}
 
-  server = http.createServer((req, res) => {
-    let requestedPath = decodeURIComponent(
-      (req.url || "/").split("?")[0]
-    );
+function external(url) {
+  try { if (new URL(url).protocol === 'https:') void shell.openExternal(url); } catch {}
+}
 
-    if (requestedPath === "/") {
-      requestedPath = "/index.html";
+function configureWindow(win, isAuth = false) {
+  win.webContents.on('will-navigate', (event, url) => {
+    const target = new URL(url);
+    if (target.origin !== origin && !(isAuth && target.origin === 'https://accounts.spotify.com')) {
+      event.preventDefault();
+      external(url);
     }
-
-    let filePath = path.join(distPath, requestedPath);
-
-    // Prevent requests escaping the dist directory
-    if (!filePath.startsWith(distPath)) {
-      res.writeHead(403);
-      res.end("Forbidden");
-      return;
-    }
-
-    fs.stat(filePath, (err, stats) => {
-      if (!err && stats.isDirectory()) {
-        filePath = path.join(filePath, "index.html");
-      }
-
-      fs.readFile(filePath, (readErr, data) => {
-        if (readErr) {
-          // SPA fallback
-          fs.readFile(path.join(distPath, "index.html"), (fallbackErr, fallback) => {
-            if (fallbackErr) {
-              res.writeHead(404);
-              res.end("Not found");
-              return;
-            }
-
-            res.writeHead(200, {
-              "Content-Type": "text/html",
-            });
-            res.end(fallback);
-          });
-
-          return;
-        }
-
-        const extension = path.extname(filePath).toLowerCase();
-
-        res.writeHead(200, {
-          "Content-Type": mimeTypes[extension] || "application/octet-stream",
-        });
-
-        res.end(data);
-      });
-    });
   });
-
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-
-    server.listen(PORT, "127.0.0.1", () => {
-      resolve();
-    });
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    if (win === mainWindow && url === 'about:blank' && frameName === 'soundscape-mini-player') {
+      if (miniWindow && !miniWindow.isDestroyed()) { miniWindow.focus(); return { action: 'deny' }; }
+      return { action: 'allow', overrideBrowserWindowOptions: {
+        ...miniBounds(), title: 'Soundscape · Mini player', resizable: false,
+        maximizable: false, fullscreenable: false,
+        autoHideMenuBar: true, backgroundColor: '#131416', alwaysOnTop: true,
+        webPreferences: secureWebPreferences,
+      } };
+    }
+    // Keep OAuth in an isolated window so Expo can complete its opener session.
+    if (win === mainWindow && new URL(url).origin === 'https://accounts.spotify.com') {
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 520, height: 740, autoHideMenuBar: true, webPreferences: secureWebPreferences } };
+    }
+    external(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('did-create-window', (child, details) => {
+    if (details.frameName === 'soundscape-mini-player') {
+      miniWindow = child;
+      child.setMenu(null);
+      child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      child.webContents.on('will-navigate', event => event.preventDefault());
+      child.on('closed', () => { miniWindow = null; });
+    } else configureWindow(child, true);
   });
 }
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 400,
-    minHeight: 600,
-    title: "BT Turntable",
-    autoHideMenuBar: true,
-
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    },
-  });
-
-  win.loadURL(`http://127.0.0.1:${PORT}`);
+async function createWindow() {
+  mainWindow = new BrowserWindow({ width: 1280, height: 850, minWidth: 800, minHeight: 600,
+    title: 'Soundscape', backgroundColor: '#111111', autoHideMenuBar: true, webPreferences: secureWebPreferences });
+  mainWindow.setMenu(null);
+  configureWindow(mainWindow);
+  mainWindow.on('closed', () => { mainWindow = null; app.quit(); });
+  await mainWindow.loadURL(origin);
 }
 
-app.whenReady().then(async () => {
-  await startServer();
-  createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+if (!app.requestSingleInstanceLock()) app.quit();
+else {
+  app.on('second-instance', () => { mainWindow?.restore(); mainWindow?.focus(); });
+  app.whenReady().then(async () => {
+    if (!app.isPackaged && process.env.SOUNDSCAPE_DEV_URL) {
+      const url = new URL(process.env.SOUNDSCAPE_DEV_URL);
+      if (!['127.0.0.1', 'localhost'].includes(url.hostname) || url.protocol !== 'http:') throw new Error('Desktop development requires a local HTTP server.');
+      origin = url.origin;
+    } else {
+      server = await startServer(path.join(app.getAppPath(), 'dist'), 43821);
+      origin = 'http://127.0.0.1:43821';
     }
-  });
-});
-
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
-
-app.on("before-quit", () => {
-  if (server) {
-    server.close();
-  }
-});
+    await createWindow();
+  }).catch(error => { console.error(error); app.quit(); });
+  app.on('window-all-closed', () => app.quit());
+  app.on('before-quit', () => { miniWindow?.close(); server?.close(); });
+}

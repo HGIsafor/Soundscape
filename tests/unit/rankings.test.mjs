@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { rankMovement } from './rankings.ts';
+import { rankMovement } from '../../src/lib/rankings.ts';
 
 const previous = ['a', 'b', 'c'].map(id => ({ item: { id } }));
 test('compares identities across reordered charts', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { palettes, readableAccent } from './theme.ts';
+import { palettes, readableAccent } from '../../src/theme/theme.ts';
 
 function luminance(hex) {
   const rgb = hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255)

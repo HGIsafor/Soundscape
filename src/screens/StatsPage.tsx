@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { spotifyApi, SpotifyToken } from './spotify';
-import { Palette, useTheme, readableAccent } from './theme';
-import { supabase } from './supabase';
-import { rankMovement } from './rankings';
+import { spotifyApi, SpotifyToken } from '../lib/spotify';
+import { Palette, useTheme, readableAccent } from '../theme/theme';
+import { supabase } from '../lib/supabase';
+import { rankMovement } from '../lib/rankings';
 
 type Item = {
   id: string; name: string; images?: { url: string }[];

@@ -1,22 +1,16 @@
-appId: com.btturntable.app
-productName: BT Turntable
-
+appId: com.soundscape.desktop
+productName: Soundscape
+extraMetadata:
+  main: electron/main.cjs
 directories:
   output: release
-
 files:
   - dist/**/*
   - electron/**/*
-
-extraMetadata:
-  main: electron/main.cjs
-
+  - package.json
+  - '!node_modules/**/*'
 win:
-  target:
-    - target: portable
-      arch:
-        - x64
-
-artifactName: BT-Turntable-${version}-${arch}.${ext}
-
-npmRebuild: false
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

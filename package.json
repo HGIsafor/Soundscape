@@ -1,6 +1,7 @@
 {
   "name": "bt-turntable",
   "version": "1.0.0",
+  "description": "Soundscape desktop music companion and pocket turntable",
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -22,14 +23,25 @@
   },
   "devDependencies": {
     "@expo/ngrok": "^4.1.0",
+    "@playwright/test": "^1.63.0",
     "@types/react": "~19.2.2",
+    "@types/react-dom": "~19.2.0",
+    "electron": "^44.5.0",
+    "electron-builder": "^26.15.3",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "desktop": "electron electron/main.cjs",
+    "desktop:export": "expo export --platform web",
+    "desktop:build": "npm run desktop:export && electron-builder --win nsis",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test tests/unit/*.test.mjs",
+    "test:mini": "node scripts/mini-player-smoke.cjs",
+    "test:desktop": "node scripts/desktop-smoke.cjs"
   },
   "private": true
 }
