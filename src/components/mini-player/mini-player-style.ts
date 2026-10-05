@@ -1,5 +1,5 @@
 export const miniPlayerStyle = `
-.preview-turntable{display:block;width:100%;height:auto;pointer-events:none;user-select:none;filter:drop-shadow(0 8px 10px #0005)}.preview-record{transform-box:view-box}.preview-arm{transform-origin:245px 35px;transform:rotate(-8deg);transition:transform .5s}.preview-arm.on{transform:rotate(45deg)}@media(prefers-reduced-motion:reduce){.preview-arm{transition:none}}
+.preview-turntable{display:block;width:100%;height:auto;pointer-events:none;user-select:none;filter:drop-shadow(0 8px 10px #0005)}.preview-record{transform-box:view-box}.preview-arm{transform-origin:245px 35px;transform:rotate(0deg);transition:transform .5s}.preview-arm.on{transform:rotate(45deg)}@media(prefers-reduced-motion:reduce){.preview-arm{transition:none}}
 .desktop-player-turntable{width:88%;margin:0 auto}
 .transport button{width:48px;height:48px;display:grid;place-items:center;padding:0;border:0;background:transparent}
 .transport button.play{width:64px;height:64px;border:0;border-radius:50%;background:var(--accent)}

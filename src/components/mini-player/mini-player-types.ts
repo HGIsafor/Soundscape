@@ -3,7 +3,7 @@ export type MiniTrack = {
   artwork?: string; durationMs: number; progressMs: number;
 };
 
-export type MiniPlayerHandle = { leavingPlayback: () => void };
+export type MiniPlayerHandle = { leavingPlayback: () => void; open: () => void; setEnabled: (enabled: boolean) => void };
 export type MiniRotationValue = {
   __getValue: () => number;
   addListener: (listener: (event: { value: number }) => void) => string;
@@ -11,6 +11,8 @@ export type MiniRotationValue = {
 };
 export type MiniPlayerProps = {
   available: boolean;
+  onNoticeChange: (notice: string) => void;
+  onEnabledChange: (enabled: boolean) => void;
   playing: boolean;
   track: MiniTrack | null;
   connected: boolean;

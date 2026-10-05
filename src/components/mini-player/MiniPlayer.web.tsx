@@ -11,13 +11,11 @@ const readEnabled = () => { try { return localStorage.getItem(preferenceKey) !==
 
 export const MiniPlayer = forwardRef<MiniPlayerHandle, MiniPlayerProps>(function MiniPlayer(props, ref) {
   const [enabled, setEnabled] = useState(readEnabled);
-  const [settings, setSettings] = useState(false);
+
   const [notice, setNotice] = useState('');
   const [host, setHost] = useState<HTMLElement | null>(null);
   const popup = useRef<Window | null>(null);
-  const dismissed = useRef(false);
   const close = () => {
-    dismissed.current = true;
     popup.current?.close();
     popup.current = null;
     setHost(null);
@@ -27,14 +25,21 @@ export const MiniPlayer = forwardRef<MiniPlayerHandle, MiniPlayerProps>(function
     try { localStorage.setItem(preferenceKey, String(value)); setNotice(''); }
     catch { setNotice('This browser cannot save settings. Your choice lasts until you reload.'); }
     if (!value) close();
-    else dismissed.current = false;
   };
   const open = () => {
     if (!props.available || !enabled) return;
     if (popup.current && !popup.current.closed) { popup.current.focus(); return; }
-    const child = window.open('about:blank', 'soundscape-mini-player', 'popup=yes,resizable=no,width=500,height=600');
+    const display = window.screen as Screen & { availLeft?: number; availTop?: number };
+    const margin = 24;
+    // Keep the 8:9 shape of 20% x 40% on a standard 16:9 monitor.
+    const scale = Math.min(display.width * 0.2 / 8, display.height * 0.4 / 9,
+      Math.max(1, display.availWidth - margin * 2) / 8, Math.max(1, display.availHeight - margin * 2) / 9);
+    const width = Math.max(1, Math.round(8 * scale));
+    const height = Math.max(1, Math.round(9 * scale));
+    const left = (display.availLeft ?? 0) + Math.max(0, display.availWidth - width - margin);
+    const top = (display.availTop ?? 0) + Math.max(0, display.availHeight - height - margin);
+    const child = window.open('about:blank', 'soundscape-mini-player', `popup=yes,resizable=no,width=${width},height=${height},left=${left},top=${top}`);
     if (!child) { setNotice('Allow popups for Soundscape, then select Mini player again.'); return; }
-    dismissed.current = false;
     popup.current = child;
     child.document.title = 'Soundscape · Mini player';
     child.document.documentElement.lang = 'en';
@@ -45,12 +50,14 @@ export const MiniPlayer = forwardRef<MiniPlayerHandle, MiniPlayerProps>(function
     const container = child.document.createElement('main');
     child.document.body.appendChild(container);
     child.addEventListener('pagehide', () => {
-      if (popup.current === child) { popup.current = null; dismissed.current = true; setHost(null); }
+      if (popup.current === child) { popup.current = null; setHost(null); }
     }, { once: true });
     setHost(container);
     setNotice('');
   };
-  useImperativeHandle(ref, () => ({ leavingPlayback: () => { if (!dismissed.current) open(); } }));
+  useImperativeHandle(ref, () => ({ leavingPlayback: () => { if (props.playing) open(); }, open, setEnabled: changeEnabled }));
+  useEffect(() => { props.onEnabledChange(enabled); }, [enabled, props.onEnabledChange]);
+  useEffect(() => { props.onNoticeChange(notice); }, [notice, props.onNoticeChange]);
   useEffect(() => {
     const cleanup = () => { popup.current?.close(); popup.current = null; };
     const synchronize = (event: StorageEvent) => {
@@ -73,17 +80,8 @@ export const MiniPlayer = forwardRef<MiniPlayerHandle, MiniPlayerProps>(function
   if (!props.available) return null;
   const button: CSSProperties = { border: '1px solid #8885', color: 'inherit', background: 'transparent', borderRadius: 20, padding: '9px 13px', cursor: 'pointer', font: '600 11px system-ui' };
   return <div style={{ position: 'relative', color: props.accent }}>
-    <div style={{ display: 'flex', gap: 6 }}>
-      <button style={{ ...button, opacity: enabled ? 1 : 0.45 }} disabled={!enabled} onClick={open} aria-label="Open mini player">Mini player ↗</button>
-      <button style={button} onClick={() => setSettings(value => !value)} aria-label="Mini-player settings" aria-expanded={settings}>⚙</button>
-    </div>
-    {settings && <div role="group" aria-label="Mini-player settings" style={{ position: 'absolute', top: 42, right: 0, width: 270, background: '#202124', color: '#f4f1e9', border: '1px solid #555', borderRadius: 12, padding: 16, boxShadow: '0 8px 25px #0008', zIndex: 100 }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 9, font: '600 13px system-ui' }}><input type="checkbox" checked={enabled} onChange={event => changeEnabled(event.target.checked)} />Enable mini player</label>
-      <p style={{ font: '12px/1.5 system-ui', color: '#b8bac1' }}>Opens when you leave Playback. Closing it keeps it closed until you reopen it. This setting is saved on this device.</p>
-      <button style={button} onClick={() => setSettings(false)}>Done</button>
-    </div>}
     {!!notice && <div role="status" style={{ position: 'absolute', top: 44, right: 0, width: 270, padding: 12, background: '#202124', color: '#eee', font: '12px/1.5 system-ui', zIndex: 101 }}>{notice}<button style={button} onClick={() => setNotice('')}>Dismiss</button></div>}
-    {host && createPortal(<Player {...props} onClose={close} onReturn={() => { window.focus(); props.onPlayback(); }} />, host)}
+    {host && createPortal(<Player {...props} onClose={close} onReturn={() => { window.focus(); props.onPlayback(); close(); }} />, host)}
   </div>;
 });
 
@@ -106,6 +104,7 @@ function Player(props: MiniPlayerProps & { onClose: () => void; onReturn: () => 
   const [progress, setProgress] = useState(track?.progressMs ?? 0);
   const [scrubbing, setScrubbing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [commandError, setCommandError] = useState('');
   const recordRef = useRef<SVGGElement | null>(null);
   const seekValue = useRef(progress);
@@ -130,12 +129,14 @@ function Player(props: MiniPlayerProps & { onClose: () => void; onReturn: () => 
     return () => clearInterval(timer);
   }, [props.playing, duration, scrubbing]);
   const run = async (command: () => void | Promise<void>) => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true); setCommandError('');
     try { await command(); } catch { setCommandError('Could not update playback. Please try again.'); }
-    finally { setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); }
   };
   const commit = (value: number) => {
+    if (busyRef.current) return;
     const next = Math.round(Math.max(0, Math.min(duration, value)));
     setScrubbing(false); setProgress(next);
     clock.current = { position: next, at: Date.now() };
@@ -149,22 +150,23 @@ function Player(props: MiniPlayerProps & { onClose: () => void; onReturn: () => 
     <MiniTurntable playing={props.playing} artwork={track?.artwork} accent={props.accent} foreground={props.foreground}
       recordRef={element => { recordRef.current = element; }} className="responsive-turntable" />
     <div className="song"><span className="eyebrow">{props.playing ? 'NOW SPINNING' : 'ON THE DECK'}</span><h1 title={track?.title}>{track?.title ?? 'Ready when you are'}</h1><p className="artist" title={track?.artist}>{track?.artist ?? 'Start a song in Spotify'}</p></div>
-    <input className="seek" type="range" aria-label="Seek playback" aria-valuetext={`${time(progress)} of ${time(duration)}`} min={0} max={Math.max(1, duration)} step={1000} value={progress} disabled={!duration || busy}
-      onPointerDown={() => { seekValue.current = progress; setScrubbing(true); }}
-      onChange={event => { seekValue.current = Number(event.target.value); setProgress(seekValue.current); }}
+    <input className="seek" type="range" aria-label="Seek playback" aria-valuetext={`${time(progress)} of ${time(duration)}`} min={0} max={Math.max(1, duration)} step={1000} value={progress} disabled={!duration} aria-disabled={!duration || busy}
+      onPointerDown={event => { if (busyRef.current) { event.preventDefault(); return; } seekValue.current = progress; setScrubbing(true); }}
+      onKeyDown={event => { if (busyRef.current && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) event.preventDefault(); }}
+      onChange={event => { if (busyRef.current) return; seekValue.current = Number(event.target.value); setProgress(seekValue.current); }}
       onPointerUp={() => commit(seekValue.current)} onPointerCancel={() => setScrubbing(false)}
       onKeyUp={event => { if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) commit(Number(event.currentTarget.value)); }} />
     <div className="times"><span>{time(progress)}</span><span>{time(duration)}</span></div>
     <div className="transport">
-      <button aria-label="Previous track" disabled={!canControl || busy} onClick={() => void run(props.onPrevious)}>
+      <button aria-label="Previous track" disabled={!canControl} aria-disabled={!canControl || busy} onClick={() => void run(props.onPrevious)}>
         <svg className="skip-symbol" viewBox="0 0 19 19" aria-hidden="true"><path className="skip-stem" d="M0 0h3v19H0z" /><path className="skip-triangle" d="M19 0 6 9.5 19 19z" /></svg>
       </button>
-      <button className="play" aria-label={props.playing ? 'Pause' : 'Play'} disabled={!canControl || busy} onClick={() => void run(props.onToggle)}>
+      <button className="play" aria-label={props.playing ? 'Pause' : 'Play'} disabled={!canControl} aria-disabled={!canControl || busy} onClick={() => void run(props.onToggle)}>
         {props.playing
           ? <svg className="pause-symbol" viewBox="0 0 15 20" aria-hidden="true"><path d="M0 0h5v20H0zM10 0h5v20h-5z" /></svg>
           : <svg className="play-symbol" viewBox="0 0 17 22" aria-hidden="true"><path d="M0 0 17 11 0 22z" /></svg>}
       </button>
-      <button aria-label="Next track" disabled={!canControl || busy} onClick={() => void run(props.onNext)}>
+      <button aria-label="Next track" disabled={!canControl} aria-disabled={!canControl || busy} onClick={() => void run(props.onNext)}>
         <svg className="skip-symbol" viewBox="0 0 19 19" aria-hidden="true"><path className="skip-triangle" d="M0 0 13 9.5 0 19z" /><path className="skip-stem" d="M16 0h3v19h-3z" /></svg>
       </button>
     </div>

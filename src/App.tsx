@@ -42,6 +42,9 @@ const EMAIL_TYPOS: Record<string, string> = { 'gmai.com': 'gmail.com', 'gmial.co
 export default function App() {
   const { width } = useDisplayDimensions();
   const miniPlayer = useRef<MiniPlayerHandle>(null);
+  const [miniPlayerNotice, setMiniPlayerNotice] = useState('');
+  const [miniPlayerEnabled, setMiniPlayerEnabled] = useState(true);
+  const [accountTab, setAccountTab] = useState<'profile' | 'settings'>('profile');
   const compact = width < 760;
   const [themeSaving, setThemeSaving] = useState(false);
   const [themeError, setThemeError] = useState('');
@@ -831,6 +834,7 @@ export default function App() {
     </View>
   );
   const openAccount = () => {
+    setAccountTab('profile');
     if (user) {
       setUsername(user.name);
       setAvatarDraft(user.avatarUrl);
@@ -848,7 +852,7 @@ export default function App() {
         <Text style={s.title}>{page === 'guitar' ? 'Guitar' : page === 'music' ? 'Turntable' : page === 'stats' ? 'On Record' : 'Soundscape'}</Text>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <MiniPlayer ref={miniPlayer} available={Platform.OS === 'web' && !compact} playing={playing}
+        <MiniPlayer ref={miniPlayer} onNoticeChange={setMiniPlayerNotice} onEnabledChange={setMiniPlayerEnabled} available={Platform.OS === 'web' && !compact} playing={playing}
         track={spotifyTrack}
         connected={!!spotifyToken || !!sharedSession} error={spotifyError} accent={accent} foreground={accentForeground(accent)} textColor={theme.text} surfaceColor={theme.bg} rotationValue={spin as unknown as MiniRotationValue}
         onToggle={() => controlSpotify('toggle')} onPrevious={() => controlSpotify('previous', spotifyHistory.at(-1))}
@@ -944,19 +948,49 @@ export default function App() {
       <Modal visible={authOpen} transparent animationType="fade" onRequestClose={() => { setAuthOpen(false); resetAuthForm(); }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.modalBackdrop}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => { setAuthOpen(false); resetAuthForm(); }} />
-          {user ? (
+          {accountTab === 'settings' ? (
             <ScrollView style={s.accountDialog} contentContainerStyle={s.dialog} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 8 }}>
+                {(['profile', 'settings'] as const).map(tab => (
+                  <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: accountTab === tab }} onPress={() => setAccountTab(tab)} style={[s.loginButton, accountTab === tab && accentTheme.backgroundBorder]}>
+                    <Text style={[s.loginButtonText, accountTab === tab && { color: accentForeground(accent) }]}>{tab === 'profile' ? 'Profile' : 'Settings'}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={s.dialogTitle}>Settings</Text>
+              <Text style={s.fieldLabel}>APPEARANCE</Text>
               <View style={s.sessionActiveRow}>
-                <Text style={[s.dialogTitle, { flex: 1 }]}>Profile settings</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View accessible={false} aria-hidden style={{ width: 20, height: 20, overflow: 'hidden' }}>
-                    <View style={{ position: 'absolute', left: 1, top: 1, width: 18, height: 18, borderRadius: 9, backgroundColor: theme.text }} />
-                    <View style={{ position: 'absolute', left: 7, top: -3, width: 17, height: 17, borderRadius: 9, backgroundColor: theme.dialog }} />
-                  </View>
-                  <Switch accessibilityLabel="Dark mode" accessibilityHint="Saves your appearance to your account" value={themeMode === 'dark'} disabled={themeSaving} onValueChange={enabled => changeTheme(enabled ? 'dark' : 'light')} trackColor={{ false: theme.line, true: accent }} thumbColor={themeMode === 'dark' ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
+                <View style={s.spotifyAccountCopy}>
+                  <Text style={s.spotifyAccountTitle}>Dark mode</Text>
+                  <Text style={s.spotifyAccountStatus}>{user ? 'Saved to your account' : 'Log in to change your appearance'}</Text>
                 </View>
+                <Switch accessibilityLabel="Dark mode" accessibilityHint="Saves your appearance to your account" value={themeMode === 'dark'} disabled={!user || themeSaving} onValueChange={enabled => changeTheme(enabled ? 'dark' : 'light')} trackColor={{ false: theme.line, true: accent }} thumbColor={themeMode === 'dark' ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
               </View>
               {!!themeError && <Text accessibilityLiveRegion="polite" style={s.errorText}>{themeError}</Text>}
+              <Text style={s.fieldLabel}>MINI PLAYER</Text>
+              <View style={{ gap: 12 }}>
+              {Platform.OS === 'web' && !compact ? <>
+                <View style={s.sessionActiveRow}>
+                  <Text style={[s.sessionRole, { flex: 1 }]}>Enable mini player</Text>
+                  <Switch accessibilityLabel="Enable mini player" value={miniPlayerEnabled} onValueChange={enabled => miniPlayer.current?.setEnabled(enabled)} trackColor={{ false: theme.line, true: accent }} thumbColor={miniPlayerEnabled ? accentForeground(accent) : theme.text} ios_backgroundColor={theme.line} />
+                </View>
+                <Text style={s.sessionHelp}>Opens when you leave Playback. Closing it dismisses it until you leave Playback again. Turn this off to keep it closed. This setting is saved on this device.</Text>
+                <Pressable accessibilityRole="button" accessibilityLabel="Open mini player" disabled={!miniPlayerEnabled} onPress={() => miniPlayer.current?.open()} style={[s.sessionHostButton, accentTheme.background, !miniPlayerEnabled && s.disabled]}><Text style={s.sessionHostText}>Open mini player</Text></Pressable>
+                {!!miniPlayerNotice && <Text accessibilityLiveRegion="polite" style={s.dialogCopy}>{miniPlayerNotice}</Text>}
+              </> : <Text style={s.sessionHelp}>The mini player is available in the desktop layout.</Text>}
+              </View>
+              <View style={s.dialogActions}><Pressable onPress={() => { setAuthOpen(false); resetAuthForm(); }} style={[s.confirm, accentTheme.background]}><Text style={s.confirmText}>Done</Text></Pressable></View>
+            </ScrollView>
+          ) : user ? (
+            <ScrollView style={s.accountDialog} contentContainerStyle={s.dialog} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 8 }}>
+                {(['profile', 'settings'] as const).map(tab => (
+                  <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: accountTab === tab }} onPress={() => setAccountTab(tab)} style={[s.loginButton, accountTab === tab && accentTheme.backgroundBorder]}>
+                    <Text style={[s.loginButtonText, accountTab === tab && { color: accentForeground(accent) }]}>{tab === 'profile' ? 'Profile' : 'Settings'}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={s.dialogTitle}>Profile settings</Text>
               <Pressable onPress={pickAvatar} style={s.photoPicker}>
                 {avatarDraft && !avatarFailed ? <Image source={{ uri: avatarDraft }} onError={() => setAvatarFailed(true)} style={s.photoPreview} /> : <View style={s.photoFallback}><Text style={s.photoInitials}>{initials(username || user.name)}</Text></View>}
                 <Text style={[s.photoAction, accentTheme.text]}>{avatarDraft ? 'Change photo' : 'Add profile photo'}</Text>
@@ -1024,6 +1058,13 @@ export default function App() {
             </ScrollView>
           ) : (
             <View style={s.dialog}>
+              <View accessibilityRole="tablist" style={{ flexDirection: 'row', gap: 8 }}>
+                {(['profile', 'settings'] as const).map(tab => (
+                  <Pressable key={tab} accessibilityRole="tab" accessibilityState={{ selected: accountTab === tab }} onPress={() => setAccountTab(tab)} style={[s.loginButton, accountTab === tab && accentTheme.backgroundBorder]}>
+                    <Text style={[s.loginButtonText, accountTab === tab && { color: accentForeground(accent) }]}>{tab === 'profile' ? 'Profile' : 'Settings'}</Text>
+                  </Pressable>
+                ))}
+              </View>
               <Text style={s.dialogTitle}>{authMode === 'login' ? 'Log in' : 'Create account'}</Text>
               <Text style={s.dialogCopy}>{authMode === 'login' ? 'Access your personal sound profiles.' : 'Every new account starts with Warm, Flat, and Bright.'}</Text>
               {authMode === 'create' && <TextInput autoFocus value={username} onChangeText={text => { setUsername(text); setAuthError(''); }} onSubmitEditing={() => emailRef.current?.focus()} returnKeyType="next" blurOnSubmit={false} placeholder="Username" placeholderTextColor={theme.subtle} selectionColor={accent} style={s.input} />}
