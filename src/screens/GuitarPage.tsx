@@ -21,6 +21,7 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
   const [search, setSearch] = useState<Search | null>(null);
   const [results, setResults] = useState<GuitarResult[]>([]);
   const [resultsWidth, setResultsWidth] = useState(0);
+  const [resultsCollapsed, setResultsCollapsed] = useState(false);
   const [selected, setSelected] = useState<GuitarResult | null>(null);
   const [tab, setTab] = useState<GuitarTab | null>(null);
   const [searching, setSearching] = useState(false);
@@ -29,17 +30,22 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
   const [tabError, setTabError] = useState('');
   const [retry, setRetry] = useState(0);
   const fontSize = 13;
+  const visibleResults = useMemo(() => {
+    if (!resultsCollapsed || !selected || search?.track) return results;
+    const artist = selected.artist.trim().toLocaleLowerCase();
+    return [selected, ...results.filter(item => item.id !== selected.id && item.artist.trim().toLocaleLowerCase() === artist)].slice(0, 5);
+  }, [results, resultsCollapsed, search?.track, selected]);
   const resultGroups = useMemo(() => {
-    if (search?.track) return [{ artist: '', items: results }];
+    if (search?.track) return [{ artist: '', items: visibleResults }];
     const groups = new Map<string, { artist: string; items: GuitarResult[] }>();
-    for (const item of results) {
+    for (const item of visibleResults) {
       const key = item.artist.trim().toLocaleLowerCase();
       const group = groups.get(key);
       if (group) group.items.push(item);
       else groups.set(key, { artist: item.artist, items: [item] });
     }
     return [...groups.values()];
-  }, [results, search?.track]);
+  }, [visibleResults, search?.track]);
   const [transpose, setTranspose] = useState(0);
   const transposedContent = useMemo(() => transposeContent(tab?.content ?? '', transpose), [tab?.content, transpose]);
   useEffect(() => { setTranspose(0); }, [selected?.url]);
@@ -66,7 +72,7 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
 
   useEffect(() => {
     if (!sync) return;
-    setSelected(null); setTab(null); setResults([]); setError(''); setTabError('');
+    setSelected(null); setResultsCollapsed(false); setTab(null); setResults([]); setError(''); setTabError('');
     if (!track) { setSearch(null); setQuery(''); return; }
     const next = `${cleanSongTitle(track.title)} ${track.artist}`.slice(0, 200);
     setQuery(next);
@@ -107,7 +113,7 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
 
   const submit = () => {
     if (query.trim().length < 2) return;
-    setSync(false); setSelected(null); setTab(null); setResults([]); setTabError('');
+    setSync(false); setSelected(null); setResultsCollapsed(false); setTab(null); setResults([]); setTabError('');
     setSearch(previous => ({ query: query.trim(), attempt: (previous?.attempt ?? 0) + 1 }));
   };
   const open = async (url: string) => {
@@ -115,6 +121,7 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
     catch { setError('Could not open the browser. Please try again.'); }
   };
   const sourceUrl = selected?.url ?? guitarSearchUrl(search?.query ?? query);
+  const chooseResult = (item: GuitarResult) => { setSelected(item); setResultsCollapsed(true); };
 
   return <ScrollView style={s.screen} contentContainerStyle={[s.page, !compact && s.desktop]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
     <View style={s.syncCard}>
@@ -125,6 +132,10 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
     {sync && track && <View style={s.nowPlaying}>
       {track.artwork && <Image source={{ uri: track.artwork }} style={s.art} />}
       <View style={s.flex}><Text style={[s.kicker, { color: accentText }]}>FOLLOWING PLAYBACK</Text><Text numberOfLines={2} style={s.song}>{track.title}</Text><Text numberOfLines={1} style={s.copy}>{track.artist}</Text></View>
+    </View>}
+
+    {!sync && selected && !search?.track && !searching && !error && <View style={s.nowPlaying}>
+      <View style={s.flex}><Text style={[s.kicker, { color: accentText }]}>SELECTED TAB</Text><Text numberOfLines={2} style={s.song}>{selected.title}</Text><Text numberOfLines={1} style={s.copy}>{selected.artist}</Text></View>
     </View>}
 
     <View style={s.searchRow}>
@@ -138,13 +149,19 @@ export function GuitarPage({ active, compact, accent, foreground, track, account
       : searching ? <View style={s.loading}><ActivityIndicator color={accentText} /><Text style={s.copy}>Finding tabs…</Text></View>
       : error ? <View style={s.empty}><Text accessibilityLiveRegion="polite" style={s.copy}>{error}</Text><Pressable accessibilityRole="button" onPress={() => setSearch({ ...search, attempt: search.attempt + 1 })}><Text style={[s.link, { color: accentText }]}>Try again</Text></Pressable></View>
       : <>
-        <View style={s.resultsHead}><Text style={s.heading}>{search.track ? 'Tabs & versions' : 'Search results'}</Text><Text style={s.hint}>{results.length} found</Text></View>
+        <View style={s.resultsHead}>
+          <Text style={s.heading}>{search.track ? 'Tabs & versions' : 'Search results'}</Text>
+          <Text style={s.hint}>{results.length} found</Text>
+          {!search.track && selected && <Pressable accessibilityRole="button" accessibilityLabel={resultsCollapsed ? 'Show all search results' : 'Show fewer search results'} onPress={() => setResultsCollapsed(value => !value)}>
+            <Text style={[s.link, { color: accentText }]}>{resultsCollapsed ? 'Show all' : 'Show fewer'}</Text>
+          </Pressable>}
+        </View>
         {!results.length && <Text style={s.copy}>No public guitar tabs or chords found. Try a shorter song title or another artist spelling.</Text>}
         {!!results.length && !selected && <Text style={s.copy}>{search.track ? 'No exact song and artist match. Choose a result below, or refine your search.' : 'Choose a version to open the tab.'}</Text>}
         {resultGroups.map(group => <View key={group.artist} style={!search.track && s.artistSection}>
           {!search.track && <View style={s.artistHeading}><View style={[s.artistMark, { backgroundColor: accent }]} /><Text accessibilityRole="header" style={s.artistName}>{group.artist}</Text><Text style={s.hint}>{group.items.length}</Text></View>}
           <View onLayout={event => setResultsWidth(event.nativeEvent.layout.width)} style={[s.results, compact && { gap: 5 }]}>
-          {group.items.map(item => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: selected?.id === item.id }} onPress={() => setSelected(item)} style={[s.result, { width: resultsWidth ? Math.floor((resultsWidth - 4 * (compact ? 5 : 8)) / 5 * 100) / 100 : '18%' }, selected?.id === item.id && { borderColor: accentText, backgroundColor: theme.raised }]}>
+          {group.items.map(item => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: selected?.id === item.id }} onPress={() => chooseResult(item)} style={[s.result, { width: resultsWidth ? Math.floor((resultsWidth - 4 * (compact ? 5 : 8)) / 5 * 100) / 100 : '18%' }, selected?.id === item.id && { borderColor: accentText, backgroundColor: theme.raised }]}>
             <Text numberOfLines={1} style={[s.kicker, { color: accentText, letterSpacing: 0, fontSize: compact ? 8 : 9 }]}>{item.type}</Text>
             <Text style={[s.version, { color: accentText }]}>V{item.version || 1}</Text>
             <Text numberOfLines={2} style={[s.resultTitle, compact && { fontSize: 10 }]}>{item.title}</Text><Text numberOfLines={1} style={s.resultArtist}>{item.artist}</Text>

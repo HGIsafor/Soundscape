@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Image, PanResponder, Pressable, ScrollView, Text, View } from 'react-native';
+import { Animated, Easing, Image, Modal, PanResponder, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { useAppStyles } from '../theme/styles';
 import { AccentContext, accentHeadingGlow } from '../theme/accent';
 import { useTheme, readableAccent } from '../theme/theme';
@@ -10,8 +10,21 @@ import { CurvedLabelText } from '../components/CurvedLabelText';
 import { SeekBar } from '../components/SeekBar';
 import { PlayPauseIcon, SkipIcon } from '../components/PlaybackIcons';
 
+function ExpandedLyric({ text, active, color, accent }: { text: string; active: boolean; color: string; accent: string }) {
+  const s = useAppStyles();
+  const emphasis = useRef(new Animated.Value(active ? 1 : 0)).current;
+  useEffect(() => {
+    const animation = Animated.timing(emphasis, { toValue: active ? 1 : 0, duration: 380, easing: Easing.inOut(Easing.cubic), useNativeDriver: false });
+    animation.start();
+    return () => animation.stop();
+  }, [active, emphasis]);
+  // Reserve the emphasized text's space so highlighting never rewraps a line.
+  return <Animated.Text style={[s.fullscreenLyricsLine, { fontSize: 30, fontWeight: '900', color: emphasis.interpolate({ inputRange: [0, 1], outputRange: [color, accent] }), transform: [{ scale: emphasis.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }] }]}>{text}</Animated.Text>;
+}
+
 export function PlaybackPage({ playing, trackIndex, compact, spotifyTrack, spotifyHistory, spotifyNextTrack, spotifyConnected, spotifyError, spin, onConnect, onToggle, onPrevious, onNext, onJump, onSeek }: { playing: boolean; trackIndex: number; compact: boolean; spotifyTrack: SpotifyTrack | null; spotifyHistory: SpotifyTrack[]; spotifyNextTrack: SpotifyTrack | null; spotifyConnected: boolean; spotifyError: string; spin: Animated.Value; onConnect: () => void; onToggle: () => void; onPrevious: () => void; onNext: () => void; onJump: (offset: number, track: SpotifyTrack) => void; onSeek: (position: number) => void }) {
   const s = useAppStyles();
+  const { height: windowHeight } = useWindowDimensions();
   const accent = useContext(AccentContext);
   const theme = useTheme();
   const accentText = readableAccent(accent, theme);
@@ -33,6 +46,38 @@ export function PlaybackPage({ playing, trackIndex, compact, spotifyTrack, spoti
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
   const [lyricsState, setLyricsState] = useState<'demo' | 'loading' | 'ready' | 'missing' | 'error'>(spotifyTrack ? 'loading' : 'demo');
   const [lyricsMode, setLyricsMode] = useState<'synced' | 'unsynced'>('synced');
+  const [lyricsFullscreen, setLyricsFullscreen] = useState(false);
+  const fullscreenLyricsRef = useRef<ScrollView>(null);
+  const fullscreenLyricOffsets = useRef<number[]>([]);
+  const fullscreenScroll = useRef(new Animated.Value(0)).current;
+  const fullscreenScrollPosition = useRef(0);
+  const fullscreenScrollTarget = useRef<number | null>(null);
+  const [lyricsFollow, setLyricsFollow] = useState(true);
+  const lyricsFollowRef = useRef(true);
+  const [fullscreenLyricsViewport, setFullscreenLyricsViewport] = useState(0);
+  const setLyricsFollowMode = (follow: boolean) => {
+    lyricsFollowRef.current = follow;
+    setLyricsFollow(follow);
+    if (!follow) { fullscreenScroll.stopAnimation(); fullscreenScrollTarget.current = null; }
+  };
+  useEffect(() => {
+    const listener = fullscreenScroll.addListener(({ value }) => {
+      fullscreenScrollPosition.current = value;
+      fullscreenLyricsRef.current?.scrollTo({ y: value, animated: false });
+    });
+    return () => { fullscreenScroll.stopAnimation(); fullscreenScroll.removeListener(listener); };
+  }, [fullscreenScroll]);
+  const scrollToActiveLyric = (index: number) => {
+    if (!lyricsFollowRef.current || index < 0) return;
+    const top = fullscreenLyricOffsets.current[index];
+    if (top === undefined) return;
+    const target = Math.max(0, top - (fullscreenLyricsViewport || windowHeight * 0.55) * 0.42);
+    if (fullscreenScrollTarget.current === target) return;
+    fullscreenScrollTarget.current = target;
+    fullscreenScroll.stopAnimation();
+    fullscreenScroll.setValue(fullscreenScrollPosition.current);
+    Animated.timing(fullscreenScroll, { toValue: target, duration: 650, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }).start();
+  };
   const [hoveredCover, setHoveredCover] = useState<number | null>(null);
   const lyricSlide = useRef(new Animated.Value(0)).current;
   const syncedScroll = useRef(new Animated.Value(0)).current;
@@ -179,9 +224,20 @@ export function PlaybackPage({ playing, trackIndex, compact, spotifyTrack, spoti
     const target = track.durationMs ? -(displayProgress / track.durationMs) * maxTravel : 0;
     Animated.timing(unsyncedScroll, { toValue: target, duration: playing ? 1000 : 180, easing: value => value, useNativeDriver: true }).start();
   }, [displayProgress, lyricsMode, rollingLyrics.length, lyrics?.synced.length, activeLyricIndex, track.durationMs, playing, lyricViewportHeight, unsyncedScroll]);
+  useEffect(() => { fullscreenLyricOffsets.current = []; fullscreenScrollTarget.current = null; }, [track.id, lyrics]);
+  useEffect(() => {
+    if (!lyricsFullscreen || lyricsMode !== 'synced') {
+      fullscreenScroll.stopAnimation();
+      fullscreenScrollTarget.current = null;
+    }
+  }, [lyricsFullscreen, lyricsMode, fullscreenScroll]);
+  useEffect(() => {
+    if (!lyricsFullscreen || !lyricsFollow || lyricsMode !== 'synced' || activeLyricIndex < 0) return;
+    scrollToActiveLyric(activeLyricIndex);
+  }, [lyricsFullscreen, lyricsFollow, lyricsMode, activeLyricIndex, fullscreenLyricsViewport, windowHeight]);
   const lyricsBlock = (
               <View style={[s.lyricsWindow, !compact && s.lyricsWindowDesktop, { minHeight: (compact ? 190 : 254) - connectionSpace }]}>
-            <View style={s.lyricsHeader}><Text style={s.lyricsKicker}>LYRICS</Text><Pressable disabled={!lyrics?.synced.length} onPress={() => setLyricsMode(current => current === 'synced' ? 'unsynced' : 'synced')} style={({ pressed }) => [s.lyricsPreviewBadge, pressed && s.pressed]}><Text style={s.lyricsPreviewBadgeText}>{lyrics?.synced.length ? lyricsMode.toUpperCase() : lyricsState === 'ready' ? 'PLAIN' : lyricsState === 'loading' ? 'LOADING' : 'NO LYRICS'}</Text></Pressable></View>
+            <View style={s.lyricsHeader}><Text style={s.lyricsKicker}>LYRICS</Text><View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}><Pressable disabled={!lyrics?.synced.length} onPress={() => setLyricsMode(current => current === 'synced' ? 'unsynced' : 'synced')} style={({ pressed }) => [s.lyricsPreviewBadge, pressed && s.pressed]}><Text style={s.lyricsPreviewBadgeText}>{lyrics?.synced.length ? lyricsMode.toUpperCase() : lyricsState === 'ready' ? 'PLAIN' : lyricsState === 'loading' ? 'LOADING' : 'NO LYRICS'}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Expand lyrics" onPress={() => { setLyricsFollowMode(true); setLyricsFullscreen(true); }} style={({ pressed }) => [s.lyricsExpandButton, { borderColor: theme.border, backgroundColor: theme.raised }, pressed && s.pressed]}><View style={[s.lyricsExpandCorner, s.lyricsExpandTopRight, { borderColor: accentText }]} /><View style={[s.lyricsExpandCorner, s.lyricsExpandBottomLeft, { borderColor: accentText }]} /></Pressable></View></View>
             <View style={[s.lyricsViewport, { height: lyricViewportHeight }]}>
             {lyricsMode === 'synced' ? <Animated.View style={[s.lyricsLines, { transform: [{ translateY: lyrics?.synced.length ? syncedScroll : lyricSlide }] }]}>
               {lyricsState === 'demo' && <Text style={s.lyricsFaded}>Start Spotify playback to load lyrics.</Text>}
@@ -196,6 +252,33 @@ export function PlaybackPage({ playing, trackIndex, compact, spotifyTrack, spoti
   )
 
   return (
+    <>
+    <Modal visible={lyricsFullscreen} animationType="fade" statusBarTranslucent onRequestClose={() => setLyricsFullscreen(false)}>
+      <View style={[s.fullscreenLyrics, { backgroundColor: theme.bg }]}>
+        <View style={s.fullscreenLyricsHeader}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.lyricsKicker, { color: accentText }]}>LYRICS</Text>
+            <Text numberOfLines={1} style={s.fullscreenLyricsTrack}>{track.title}</Text>
+            <Text numberOfLines={1} style={s.trackArtist}>{track.artist}</Text>
+          </View>
+          <Pressable accessibilityRole="button" accessibilityLabel="Close fullscreen lyrics" onPress={() => setLyricsFullscreen(false)} style={({ pressed }) => [s.fullscreenLyricsClose, { borderColor: theme.border, backgroundColor: theme.raised }, pressed && s.pressed]}><View style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}><View style={{ position: 'absolute', width: 18, height: 2, borderRadius: 1, backgroundColor: theme.text, transform: [{ rotate: '45deg' }] }} /><View style={{ position: 'absolute', width: 18, height: 2, borderRadius: 1, backgroundColor: theme.text, transform: [{ rotate: '-45deg' }] }} /></View></Pressable>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <Text style={s.dialogCopy}>{lyrics?.synced.length ? 'Karaoke lyrics' : lyricsState === 'loading' ? 'Finding lyrics...' : 'Lyrics'}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {!lyricsFollow && !!lyrics?.synced.length && <Pressable accessibilityRole="button" onPress={() => setLyricsFollowMode(true)}><Text style={{ color: accentText, fontSize: 12, fontWeight: '800' }}>Follow</Text></Pressable>}
+          <Pressable disabled={!lyrics?.synced.length} onPress={() => setLyricsMode(mode => mode === 'synced' ? 'unsynced' : 'synced')} style={({ pressed }) => [s.lyricsPreviewBadge, pressed && s.pressed]}><Text style={s.lyricsPreviewBadgeText}>{lyrics?.synced.length ? lyricsMode.toUpperCase() : lyricsState === 'ready' ? 'PLAIN' : lyricsState === 'loading' ? 'LOADING' : 'NO LYRICS'}</Text></Pressable>
+          </View>
+        </View>
+        <ScrollView ref={fullscreenLyricsRef} scrollEventThrottle={16} onScroll={event => { fullscreenScrollPosition.current = event.nativeEvent.contentOffset.y; }} onLayout={event => setFullscreenLyricsViewport(event.nativeEvent.layout.height)} onScrollBeginDrag={() => setLyricsFollowMode(false)} onTouchMove={() => setLyricsFollowMode(false)} {...({ onWheel: () => setLyricsFollowMode(false) } as any)} style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: Math.max(20, windowHeight * 0.18), gap: 20 }} showsVerticalScrollIndicator={false}>
+          {lyricsState === 'demo' && <Text style={s.fullscreenLyricsLine}>Start Spotify playback to load lyrics.</Text>}
+          {lyricsState === 'loading' && <Text style={s.fullscreenLyricsLine}>Finding lyrics...</Text>}
+          {(lyricsState === 'missing' || lyricsState === 'error') && <Text style={s.fullscreenLyricsLine}>{lyricsState === 'missing' ? 'No lyrics found for this track.' : 'Lyrics are temporarily unavailable.'}</Text>}
+          {lyrics?.instrumental && <Text style={s.fullscreenLyricsLine}>Instrumental track</Text>}
+          {lyricsMode === 'synced' && !!lyrics?.synced.length ? lyrics.synced.map((line, index) => <View key={line.timeMs + '-' + index} onLayout={event => { fullscreenLyricOffsets.current[index] = event.nativeEvent.layout.y; if (index === activeLyricIndex) scrollToActiveLyric(index); }}><ExpandedLyric text={line.text} active={index === activeLyricIndex} accent={accent} color={index < activeLyricIndex ? theme.subtle : theme.secondary} /></View>) : (lyrics?.plain.length ? lyrics.plain : rollingLyrics).map((line, index) => <Text key={index} style={[s.fullscreenLyricsLine, { color: theme.text }]}>{line}</Text>)}
+        </ScrollView>
+      </View>
+    </Modal>
     <ScrollView style={s.screen} showsVerticalScrollIndicator={false} contentContainerStyle={[s.musicPage, !compact && s.musicPageDesktop]}>
       <View style={[s.musicLayout, !compact && s.musicLayoutDesktop]}>
         <View style={[s.deckColumn, !compact && s.deckColumnDesktop]}>
@@ -257,5 +340,6 @@ export function PlaybackPage({ playing, trackIndex, compact, spotifyTrack, spoti
         </View>
       </View>
     </ScrollView>
+    </>
   );
 }
